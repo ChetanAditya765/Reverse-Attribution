@@ -1,136 +1,77 @@
 """
-Reverse Attribution - A framework for explaining model uncertainty via counter-evidence analysis.
+Reverse Attribution – public API
 
-This package provides tools for:
-- Generating reverse attribution explanations
-- Training and evaluating models
-- Visualizing explanations and results
-- Conducting user studies
-- Comparing with baseline explanation methods
+Exposes:
+    • ReverseAttribution core explainer
+    • ModelFactory aware of BERTSentimentClassifier & ResNetCIFAR
+    • Dataset utilities
+    • Evaluation framework
+    • Metrics module
+    • Visualization utilities
+    • User-study components
 """
 
-from importlib.metadata import version
+from importlib.metadata import version as _pkg_version
 
-# Core RA algorithm
+# Core algorithm
 from .ra import ReverseAttribution
 
-# Model utilities
+# Model factory
 from .model_factory import ModelFactory
-from .model_utils import (
-    ModelCheckpointManager,
-    ModelWrapper,
-    ConfigManager,
-    count_parameters,
-    get_model_size_mb,
-    freeze_layers,
-    unfreeze_layers
-)
 
 # Data handling
 from .dataset_utils import DatasetLoader, TextDataset, get_dataset_info
 
-# Evaluation and metrics
-from .evaluate import ModelEvaluator, evaluate_with_user_study_data
-from .metrics import (
-    expected_calibration_error,
-    jaccard_index,
-    f1_score_localization,
-    trust_change,
-    compute_brier_score,
-    evaluate_all_jmlr_metrics
+# Evaluation & metrics
+from .evaluate import (
+    ModelEvaluator,
+    evaluate_with_user_study_data,
+    create_evaluation_report,
 )
-
-# Explanation methods
-from .explainer_utils import (
-    ExplainerHub,
-    BaselineExplainer,
-    SHAPExplainer,
-    LIMEExplainer,
-    CaptumExplainer,
-    normalize_attributions,
-    extract_top_features
-)
+from . import metrics
 
 # Visualization
-from .visualizer import (
-    ExplanationVisualizer,
-    create_word_cloud_from_attributions,
-    save_explanation_report
-)
+from .visualizer import ExplanationVisualizer
 
 # User studies
 from .user_study import (
     UserStudySession,
     TrustCalibrationStudy,
     DebuggingTimeStudy,
-    UserStudyAnalyzer
+    UserStudyAnalyzer,
 )
 
-# Import metrics module for easier access
-from . import metrics
+# Convenience model shortcuts
+def _safe_import(path: str, name: str):
+    try:
+        return __import__(path, fromlist=[name]).__dict__[name]
+    except Exception:
+        return None
+
+get_bert_model     = _safe_import("models", "get_bert_model")
+get_resnet56_model = _safe_import("models", "get_resnet56_model")
 
 __all__ = [
-    # Core functionality
     "ReverseAttribution",
-    
-    # Model utilities
     "ModelFactory",
-    "ModelCheckpointManager", 
-    "ModelWrapper",
-    "ConfigManager",
-    "count_parameters",
-    "get_model_size_mb",
-    "freeze_layers",
-    "unfreeze_layers",
-    
-    # Data handling
+    "get_bert_model",
+    "get_resnet56_model",
     "DatasetLoader",
-    "TextDataset", 
+    "TextDataset",
     "get_dataset_info",
-    
-    # Evaluation
     "ModelEvaluator",
     "evaluate_with_user_study_data",
-    
-    # Metrics
-    "expected_calibration_error",
-    "jaccard_index",
-    "f1_score_localization", 
-    "trust_change",
-    "compute_brier_score",
-    "evaluate_all_jmlr_metrics",
+    "create_evaluation_report",
     "metrics",
-    
-    # Explanation methods
-    "ExplainerHub",
-    "BaselineExplainer",
-    "SHAPExplainer", 
-    "LIMEExplainer",
-    "CaptumExplainer",
-    "normalize_attributions",
-    "extract_top_features",
-    
-    # Visualization
     "ExplanationVisualizer",
-    "create_word_cloud_from_attributions",
-    "save_explanation_report",
-    
-    # User studies
     "UserStudySession",
     "TrustCalibrationStudy",
-    "DebuggingTimeStudy", 
+    "DebuggingTimeStudy",
     "UserStudyAnalyzer",
-    
-    # Version
     "__version__",
 ]
 
 try:
-    __version__ = version("reverse-attribution")
+    __version__ = _pkg_version("reverse-attribution")
 except Exception:
-    __version__ = "1.0.0"
-
-# Package metadata
-__author__ = "Chetan Aditya Lakka"
-__email__ = "your.email@domain.com"
-__description__ = "Reverse Attribution: Explaining Model Uncertainty via Counter-Evidence Analysis"
+    __version__ = "0.0.0.dev"

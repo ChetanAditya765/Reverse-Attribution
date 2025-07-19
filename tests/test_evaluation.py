@@ -1,102 +1,64 @@
 """
-Run end-to-end evaluation on fine-tuned text models
-(IMDB or Yelp) and save metrics + RA analysis to JSON.
+tests/test_evaluation.py
 
-Usage
------
-python scripts/text_evaluation.py \
-    --dataset imdb \
-    --ckpt checkpoints/bert_imdb/best_model.pt \
-    --out results/imdb_eval.json
+Unit-tests for evaluation framework using your actual model implementations and RA.
 """
-import argparse, json, os, torch, numpy as np
-from tqdm import tqdm
-from ra.model_factory import ModelFactory
+
+import torch
+import pytest
+from ra.evaluate import ModelEvaluator, check_evaluation_compatibility
+from models.bert_sentiment import create_bert_sentiment_model
+from models.resnet_cifar import resnet56_cifar
 from ra.dataset_utils import DatasetLoader
-from ra.ra import ReverseAttribution
-from metrics import expected_calibration_error, compute_brier_score
+import numpy as np
 
-@torch.no_grad()
-def main(args):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # ------------------------------------------------------------------ #
-    # Model + tokenizer
-    # ------------------------------------------------------------------ #
-    model = ModelFactory.create_text_model(
-        model_name=args.hf_model,
-        num_classes=2,
-        checkpoint_path=args.ckpt,
-    ).to(device).eval()
-
-    ra = ReverseAttribution(model, device=device)
+@pytest.fixture(scope="module")
+def bert_model_and_data():
+    model = create_bert_sentiment_model("prajjwal1/bert-tiny", num_classes=2).eval()
     loader = DatasetLoader()
-    dl = loader.create_text_dataloader(
-        args.dataset, "test", model.tokenizer,
-        batch_size=args.batch, shuffle=False
+    dataloader = loader.create_text_dataloader(
+        "imdb", "test", model.tokenizer, batch_size=4, shuffle=False
     )
+    return model, dataloader
 
-    # holders
-    y_true, y_pred, probs, ra_results = [], [], [], []
 
-    print("⏳ running inference …")
-    for batch in tqdm(dl):
-        logits = model(
-            batch["input_ids"].to(device),
-            batch["attention_mask"].to(device)
-        )
-        p = torch.softmax(logits, -1)
-        preds = p.argmax(-1).cpu().tolist()
-
-        y_pred.extend(preds)
-        probs.extend(p.cpu().numpy())
-        y_true.extend(batch["labels"].tolist())
-
-        # optional RA on errors
-        if args.ra and len(ra_results) < args.ra_samples:
-            for i in range(len(preds)):
-                if preds[i] != batch["labels"][i].item():
-                    res = ra.explain(
-                        batch["input_ids"][i : i + 1],
-                        y_true=batch["labels"][i].item(),
-                    )
-                    ra_results.append(res)
-                    if len(ra_results) == args.ra_samples:
-                        break
-
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    probs  = np.vstack(probs)
-    acc    = (y_true == y_pred).mean()
-    ece    = expected_calibration_error(
-        np.max(probs, 1), (y_true == y_pred).astype(int)
+@pytest.fixture(scope="module")
+def resnet_model_and_data():
+    model = resnet56_cifar(num_classes=10).eval()
+    loader = DatasetLoader()
+    dataloader = loader.create_vision_dataloader(
+        split="test", batch_size=4, shuffle=False
     )
-    brier  = compute_brier_score(probs, y_true)
+    return model, dataloader
 
-    out = dict(
-        dataset=args.dataset,
-        accuracy=float(acc),
-        ece=float(ece),
-        brier=float(brier),
-        num_samples=int(len(y_true)),
-        ra_summary={
-            "avg_a_flip": float(np.mean([r["a_flip"] for r in ra_results]))
-            if ra_results else None,
-            "evaluated": len(ra_results),
-        },
-    )
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    json.dump(out, open(args.out, "w"), indent=2)
-    print(f"✅  saved results to {args.out}")
+def test_bert_evaluation_metrics(bert_model_and_data):
+    model, dl = bert_model_and_data
+    evaluator = ModelEvaluator(model, device="cpu", save_dir="./tmp_eval")
+    
+    metrics = evaluator.evaluate_standard_metrics(dl, dataset_name="imdb")
+    assert 0.0 <= metrics["accuracy"] <= 1.0
+    assert "ece" in metrics and isinstance(metrics["ece"], float)
+    assert metrics["model_type"] in {"bert_sentiment", "text_transformer"}
+    
+    ra_res = evaluator.evaluate_reverse_attribution(dl, "imdb", max_samples=5)
+    assert "summary" in ra_res and "avg_a_flip" in ra_res["summary"]
 
-if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--dataset", choices=["imdb", "yelp"], required=True)
-    p.add_argument("--hf_model", default="bert-base-uncased")
-    p.add_argument("--ckpt", required=True)
-    p.add_argument("--batch", type=int, default=32)
-    p.add_argument("--ra", action="store_true", help="run RA on errors")
-    p.add_argument("--ra_samples", type=int, default=200)
-    p.add_argument("--out", required=True)
-    main(p.parse_args())
+
+def test_resnet_evaluation_metrics(resnet_model_and_data):
+    model, dl = resnet_model_and_data
+    evaluator = ModelEvaluator(model, device="cpu", save_dir="./tmp_eval")
+    
+    metrics = evaluator.evaluate_standard_metrics(dl, dataset_name="cifar10")
+    assert 0.0 <= metrics["accuracy"] <= 1.0
+    assert metrics["model_type"] in {"resnet_cifar", "vision_cnn"}
+    
+    ra_res = evaluator.evaluate_reverse_attribution(dl, "cifar10", max_samples=5)
+    assert "summary" in ra_res and "avg_counter_evidence_count" in ra_res["summary"]
+
+
+def test_evaluation_compatibility():
+    status = check_evaluation_compatibility()
+    # At least one model type should be available
+    assert any(status.values())

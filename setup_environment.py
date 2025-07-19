@@ -1,203 +1,137 @@
 """
-Complete environment setup script for the Reverse-Attribution project.
-Creates a Conda (or Mamba) environment, installs all dependencies, writes
-configuration files, and verifies that key packages import correctly.
+Automated environment setup for Reverse Attribution project.
+Creates a Conda environment (or uses system Python), installs dependencies,
+scaffolds project structure, writes config files, and verifies model imports.
 
-Usage examples
---------------
-# Standard automated setup
-python setup_environment.py
-
-# Use a custom environment name
-python setup_environment.py --environment-name ra-env
-
-# Skip Conda (install into your active Python)
-python setup_environment.py --skip-conda
+Usage:
+    python setup_environment.py
+    python setup_environment.py --env-name ra-env --skip-conda
 """
 
-from __future__ import annotations
-
-import argparse
-import os
-import platform
-import subprocess
-import sys
+import argparse, sys, subprocess, platform
 from pathlib import Path
-from typing import Dict, List
+import logging
+import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-PY_VER = "3.9"
-DEFAULT_ENV = "reverse-attribution"
+# Setup logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
 
+# Core conda dependencies
+CORE_DEPS = [
+    "python=3.9",
+    "pytorch=2.1.0",
+    "torchvision=0.16.0",
+    "pytorch-cuda=11.8",
+    "transformers=4.35.0",
+    "datasets=2.14.0",
+    "numpy=1.24.0",
+    "pandas=2.1.0",
+    "scikit-learn=1.3.0",
+    "matplotlib=3.7.0",
+    "seaborn=0.12.0",
+    "plotly=5.17.0",
+    "streamlit=1.28.0",
+]
 
-# --------------------------------------------------------------------------- #
-# Utility helpers
-# --------------------------------------------------------------------------- #
-def _cmd_ok(cmd: list[str]) -> bool:
-    try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
+PIP_DEPS = [
+    "captum==0.6.0",
+    "shap==0.42.0",
+    "lime==0.2.0.1",
+    "wordcloud==1.9.2",
+    "colorcet==3.0.1",
+    "opencv-python==4.8.0.76",
+    "tqdm==4.66.0",
+    "pyyaml==6.0.1",
+    "pytest==7.4.0",
+    "pytest-cov==4.1.0",
+    "black==23.7.0",
+    "isort==5.12.0",
+    "flake8==6.0.0",
+    "mypy==1.5.0",
+]
 
+def cmd_exists(cmd):
+    return subprocess.run([cmd, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
-def _print_pair(label: str, ok: bool):
-    status = "✅" if ok else "❌"
-    print(f"  {status} {label}")
-
-
-# --------------------------------------------------------------------------- #
-# Core class
-# --------------------------------------------------------------------------- #
-class SetupEnv:
-    """End-to-end environment builder."""
-
-    # Conda-channel packages (strict pinning for reproducibility)
-    CORE_DEPS: list[str] = [
-        f"python={PY_VER}",
-        "pytorch=2.1.0",
-        "torchvision=0.16.0",
-        "pytorch-cuda=11.8",
-        "transformers=4.35.0",
-        "datasets=2.14.0",
-        "scikit-learn=1.3.0",
-        "numpy=1.24.0",
-        "pandas=2.1.0",
-        "matplotlib=3.7.0",
-        "seaborn=0.12.0",
-        "plotly=5.17.0",
-        "streamlit=1.28.0",
-        "jupyter=1.0.0",
-    ]
-
-    # pip-only packages
-    PIP_DEPS: list[str] = [
-        "captum==0.6.0",
-        "shap==0.42.0",
-        "lime==0.2.0.1",
-        "wordcloud==1.9.2",
-        "colorcet==3.0.1",
-        "opencv-python==4.8.0.76",
-        "tqdm==4.66.0",
-        "pyyaml==6.0.1",
-        "pytest==7.4.0",
-        "pytest-cov==4.1.0",
-        "black==23.7.0",
-        "isort==5.12.0",
-        "flake8==6.0.0",
-        "mypy==1.5.0",
-    ]
-
-    def __init__(self, env_name: str, skip_conda: bool):
-        self.env_name = env_name
-        self.skip_conda = skip_conda
-        self.conda_cmd = "mamba" if _cmd_ok(["mamba", "--version"]) else "conda"
-
-    # --------------------------------------------------------------------- #
-    # Steps
-    # --------------------------------------------------------------------- #
-    def check_prereqs(self) -> bool:
-        print("🔍  Checking prerequisites")
-        ok_python = sys.version_info >= (3, 9)
-        _print_pair("Python 3.9+", ok_python)
-
-        if not self.skip_conda:
-            ok_conda = _cmd_ok([self.conda_cmd, "--version"])
-            _print_pair(self.conda_cmd, ok_conda)
-        else:
-            ok_conda = True
-
-        ok_git = _cmd_ok(["git", "--version"])
-        _print_pair("git", ok_git)
-
-        return ok_python and ok_conda and ok_git
-
-    def create_env(self):
-        if self.skip_conda:
-            print("⏭️  Skipping Conda environment creation")
-            return
-        print(f"🐍  Creating Conda environment '{self.env_name}'")
-        cmd = [
-            self.conda_cmd,
-            "create",
-            "-y",
-            "-n",
-            self.env_name,
-            "-c",
-            "pytorch",
-            "-c",
-            "nvidia",
-            "-c",
-            "conda-forge",
-            *self.CORE_DEPS,
-        ]
-        subprocess.run(cmd, check=True)
-        print("✅  Conda environment created")
-
-    def install_pip(self):
-        print("📦  Installing pip-only packages")
-        pip_exec = ["pip", "install"] if self.skip_conda else ["conda", "run", "-n", self.env_name, "pip", "install"]
-        subprocess.run(pip_exec + self.PIP_DEPS, check=True)
-        print("✅  pip installation completed")
-
-    def scaffold_dirs(self):
-        print("📁  Creating project folders")
-        for d in ["data", "checkpoints", "results", "logs", "configs", "user_study_data"]:
-            (PROJECT_ROOT / d).mkdir(exist_ok=True)
-            print(f"  • {d}/")
-
-    def write_requirements(self):
-        req_txt = PROJECT_ROOT / "requirements.txt"
-        with open(req_txt, "w") as f:
-            for dep in self.CORE_DEPS:
-                if dep.startswith("python"):
-                    continue
-                pkg = dep.replace("=", "==")
-                if "pytorch-cuda" in pkg:
-                    continue
-                f.write(f"{pkg}\n")
-            for dep in self.PIP_DEPS:
-                f.write(f"{dep}\n")
-        print(f"📝  Wrote {req_txt}")
-
-    def verify(self):
-        print("🔧  Verifying key imports")
-        test_pkgs = ["torch", "transformers", "datasets", "captum", "shap", "streamlit"]
-        base_cmd = ["python", "-c"] if self.skip_conda else ["conda", "run", "-n", self.env_name, "python", "-c"]
-        for pkg in test_pkgs:
-            try:
-                subprocess.run(base_cmd + [f"import {pkg}; print('{pkg} OK')"], check=True, stdout=subprocess.DEVNULL)
-                _print_pair(pkg, True)
-            except subprocess.CalledProcessError:
-                _print_pair(pkg, False)
-
-    # --------------------------------------------------------------------- #
-    # Orchestrator
-    # --------------------------------------------------------------------- #
-    def run(self):
-        if not self.check_prereqs():
-            print("❌  Unmet prerequisites – aborting.")
+def check_prereqs(skip_conda):
+    logger.info("🔍 Checking prerequisites…")
+    ok_python = sys.version_info >= (3,9)
+    logger.info(f"  {'✅' if ok_python else '❌'} Python ≥3.9")
+    if not skip_conda:
+        manager = "mamba" if cmd_exists("mamba") else "conda"
+        ok_conda = cmd_exists(manager)
+        logger.info(f"  {'✅' if ok_conda else '❌'} {manager}")
+        if not ok_conda:
+            logger.error("Conda/Mamba required or use --skip-conda")
             sys.exit(1)
+    ok_git = cmd_exists("git")
+    logger.info(f"  {'✅' if ok_git else '❌'} git")
+    return
 
-        if not self.skip_conda:
-            self.create_env()
-        self.install_pip()
-        self.scaffold_dirs()
-        self.write_requirements()
-        self.verify()
-        print("\n🎉  Setup finished. Next steps:")
-        if not self.skip_conda:
-            print(f"  • conda activate {self.env_name}")
-        print("  • python reproduce_results.py --all\n")
+def create_conda_env(env_name):
+    manager = "mamba" if cmd_exists("mamba") else "conda"
+    logger.info(f"🐍 Creating Conda env '{env_name}' via {manager}…")
+    subprocess.run([manager, "create", "-y", "-n", env_name, "-c", "pytorch", "-c", "nvidia", "-c", "conda-forge"] + CORE_DEPS, check=True)
+    logger.info("✅ Conda environment created")
 
+def install_pip(env_name, skip_conda):
+    logger.info("📦 Installing pip dependencies…")
+    if skip_conda:
+        pip_cmd = ["pip", "install"]
+    else:
+        pip_cmd = ["conda", "run", "-n", env_name, "pip", "install"]
+    subprocess.run(pip_cmd + PIP_DEPS, check=True)
+    logger.info("✅ Pip packages installed")
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
+def scaffold_dirs():
+    logger.info("📁 Scaffolding project directories…")
+    for d in ["data","checkpoints","results","logs","configs","user_study_data","reproduction_results"]:
+        Path(d).mkdir(exist_ok=True)
+        logger.info(f"  • {d}/")
+
+def write_example_configs():
+    cfg = {
+        "seed": 42,
+        "device": "cuda" if cmd_exists("nvidia-smi") else "cpu",
+        "data_dir": "./data",
+        "checkpoints_dir": "./checkpoints",
+        "results_dir": "./results",
+        "text_models": {
+            "imdb": {"model_class":"BERTSentimentClassifier","model_name":"bert-base-uncased","num_classes":2,"epochs":3,"batch_size":16,"learning_rate":2e-5,"max_length":512,"output_dir":"./checkpoints/bert_imdb"},
+            "yelp": {"model_class":"BERTSentimentClassifier","model_name":"roberta-base","num_classes":2,"epochs":3,"batch_size":8,"learning_rate":1e-5,"max_length":512,"output_dir":"./checkpoints/roberta_yelp"},
+        },
+        "vision_models": {
+            "cifar10": {"model_class":"ResNetCIFAR","architecture":"resnet56","num_classes":10,"epochs":200,"batch_size":128,"learning_rate":0.1,"weight_decay":1e-4,"output_dir":"./checkpoints/resnet56_cifar10"}
+        }
+    }
+    with open("configs/experiment.yml","w") as f:
+        yaml.dump(cfg, f)
+    logger.info("📝 configs/experiment.yml written")
+
+def verify_imports(env_name, skip_conda):
+    logger.info("🔧 Verifying key imports…")
+    base = [] if skip_conda else ["conda","run","-n",env_name]
+    pkgs = ["torch","transformers","datasets","captum","shap","lime","streamlit"]
+    for pkg in pkgs:
+        cmd = base + ["python","-c",f"import {pkg}"]
+        ok = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        logger.info(f"  {'✅' if ok else '❌'} {pkg}")
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--env-name","-n",default="reverse-attribution",help="Conda env name")
+    p.add_argument("--skip-conda",action="store_true",help="Use system Python")
+    args = p.parse_args()
+
+    check_prereqs(args.skip_conda)
+    if not args.skip_conda:
+        create_conda_env(args.env_name)
+    install_pip(args.env_name, args.skip_conda)
+    scaffold_dirs()
+    write_example_configs()
+    verify_imports(args.env_name, args.skip_conda)
+    logger.info("\n🎉 Setup complete!\n")
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Reverse-Attribution environment setup")
-    parser.add_argument("--environment-name", "-n", default=DEFAULT_ENV, help="Conda environment name")
-    parser.add_argument("--skip-conda", action="store_true", help="Install into current Python without Conda")
-    args = parser.parse_args()
-
-    SetupEnv(env_name=args.environment_name, skip_conda=args.skip_conda).run()
+    main()
