@@ -14,9 +14,9 @@ import numpy as np
 from pathlib import Path
 
 # Import your models
-from ra.models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
-from ra.models.resnet_cifar import resnet56_cifar, get_model_info
-from ra.models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
+from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
+from models.resnet_cifar import resnet56_cifar, get_model_info
+from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
 
 # Import RA framework
 from ra.ra import ReverseAttribution

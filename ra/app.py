@@ -12,6 +12,7 @@ Integrates:
 import streamlit as st
 import torch
 from pathlib import Path
+import time
 
 # Add project root to path
 import sys

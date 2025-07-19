@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 # Import your actual ResNet implementations
-from ra.models.resnet_cifar import (
+from models.resnet_cifar import (
     resnet20_cifar, resnet32_cifar, resnet56_cifar, resnet110_cifar,
     ResNetCIFARTrainer, get_model_info
 )

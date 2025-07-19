@@ -17,12 +17,12 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 # Import your actual model implementations
-from ra.models.bert_sentiment import BERTSentimentClassifier, BERTSentimentTrainer
-from ra.models.resnet_cifar import (
+from models.bert_sentiment import BERTSentimentClassifier, BERTSentimentTrainer
+from models.resnet_cifar import (
     ResNetCIFAR, resnet56_cifar, resnet20_cifar, resnet32_cifar, 
     ResNetCIFARTrainer, get_model_info
 )
-from ra.models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
+from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
 
 # Import RA framework
 from ra.ra import ReverseAttribution

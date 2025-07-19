@@ -36,8 +36,8 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import your actual model implementations
-from ra.models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
-from ra.models.resnet_cifar import (
+from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
+from models.resnet_cifar import (
     resnet56_cifar, resnet20_cifar, resnet32_cifar, 
     ResNetCIFAR, get_model_info
 )

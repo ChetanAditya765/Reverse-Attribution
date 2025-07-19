@@ -8,8 +8,8 @@ import torch
 import pytest
 
 # Import your actual model classes
-from ra.models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
-from ra.models.resnet_cifar import (
+from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
+from models.resnet_cifar import (
     resnet20_cifar, resnet32_cifar, resnet44_cifar,
     resnet56_cifar, resnet110_cifar, get_model_info
 )

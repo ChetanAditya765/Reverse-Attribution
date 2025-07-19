@@ -20,7 +20,7 @@ from script_2 import train_vision_model, train_multiple_vision_models
 from script_3 import evaluate_all_models
 
 # Import your actual model availability checks
-from ra.models import get_bert_model, get_resnet56_model
+from models import get_bert_model, get_resnet56_model
 
 
 def check_model_availability():
@@ -49,7 +49,7 @@ def check_model_availability():
     
     try:
         # Test custom models
-        from ra.models.custom_model_example import CustomTextClassifier
+        from models.custom_model_example import CustomTextClassifier
         test_custom = CustomTextClassifier(num_classes=2)
         available['custom_models'] = True
         print("✅ Your custom model examples available")

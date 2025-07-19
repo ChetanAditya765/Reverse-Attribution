@@ -128,7 +128,7 @@ def get_model_integration_status():
         from pathlib import Path
         sys.path.append(str(Path(__file__).parent.parent))
         
-        from ra.models.bert_sentiment import BERTSentimentClassifier
+        from models.bert_sentiment import BERTSentimentClassifier
         integration_status['bert_sentiment'] = {
             'available': True,
             'class': 'BERTSentimentClassifier',
@@ -143,7 +143,7 @@ def get_model_integration_status():
     
     # Check ResNet integration
     try:
-        from ra.models.resnet_cifar import resnet56_cifar, ResNetCIFAR
+        from models.resnet_cifar import resnet56_cifar, ResNetCIFAR
         integration_status['resnet_cifar'] = {
             'available': True,
             'class': 'ResNetCIFAR',
@@ -159,7 +159,7 @@ def get_model_integration_status():
     
     # Check custom models
     try:
-        from ra.models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
+        from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
         integration_status['custom_models'] = {
             'available': True,
             'classes': ['CustomTextClassifier', 'CustomVisionClassifier'],

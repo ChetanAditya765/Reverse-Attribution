@@ -1,33 +1,20 @@
+# models/__init__.py
+
 """
-models/__init__.py
+Top-level models package for Reverse Attribution.
 
-Model implementations for the Reverse Attribution framework.
-
-This package exposes:
-- BERT-based sentiment analysis models
-- Custom model integration examples
-- ResNet architectures for CIFAR datasets
+Re-exports implementations from ra/models so scripts can import via `models.*`.
 """
 
-# BERT sentiment models
-from .bert_sentiment import (
+# BERT-based sentiment models
+from ra.models.bert_sentiment import (
     BERTSentimentClassifier,
     BERTSentimentTrainer,
     create_bert_sentiment_model,
 )
 
-# Custom model examples
-from .custom_model_example import (
-    CustomTextClassifier,
-    CustomVisionClassifier,
-    CustomModelWrapper,
-    demonstrate_custom_text_model,
-    demonstrate_custom_vision_model,
-    run_complete_example,
-)
-
-# ResNet CIFAR models
-from .resnet_cifar import (
+# ResNet CIFAR implementations
+from ra.models.resnet_cifar import (
     ResNetCIFAR,
     BasicBlock,
     Bottleneck,
@@ -41,32 +28,35 @@ from .resnet_cifar import (
     get_model_info,
 )
 
+# Custom model examples
+from ra.models.custom_model_example import (
+    CustomTextClassifier,
+    CustomVisionClassifier,
+    CustomModelWrapper,
+    demonstrate_custom_text_model,
+    demonstrate_custom_vision_model,
+    run_complete_example,
+)
+
 # Convenience factory functions
 def get_bert_model(model_name: str = "bert-base-uncased", num_classes: int = 2, **kwargs):
     """
-    Create a BERT sentiment model.
+    Create and return a BERTSentimentClassifier.
     """
     return create_bert_sentiment_model(model_name, num_classes, **kwargs)
 
 def get_resnet56_model(num_classes: int = 10, **kwargs):
     """
-    Create a ResNet-56 model for CIFAR.
+    Create and return a ResNet-56 CIFAR model.
     """
     return resnet56_cifar(num_classes, **kwargs)
 
 __all__ = [
-    # BERT models
+    # BERT sentiment
     "BERTSentimentClassifier",
     "BERTSentimentTrainer",
     "create_bert_sentiment_model",
     "get_bert_model",
-    # Custom models
-    "CustomTextClassifier",
-    "CustomVisionClassifier",
-    "CustomModelWrapper",
-    "demonstrate_custom_text_model",
-    "demonstrate_custom_vision_model",
-    "run_complete_example",
     # ResNet CIFAR
     "ResNetCIFAR",
     "BasicBlock",
@@ -80,4 +70,11 @@ __all__ = [
     "wide_resnet28_10_cifar",
     "get_model_info",
     "get_resnet56_model",
+    # Custom examples
+    "CustomTextClassifier",
+    "CustomVisionClassifier",
+    "CustomModelWrapper",
+    "demonstrate_custom_text_model",
+    "demonstrate_custom_vision_model",
+    "run_complete_example",
 ]

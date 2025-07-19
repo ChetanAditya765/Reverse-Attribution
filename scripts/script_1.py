@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 # Import your actual BERT model implementation
-from ra.models.bert_sentiment import BERTSentimentClassifier, BERTSentimentTrainer
+from models.bert_sentiment import BERTSentimentClassifier, BERTSentimentTrainer
 from ra.dataset_utils import DatasetLoader
 
 
