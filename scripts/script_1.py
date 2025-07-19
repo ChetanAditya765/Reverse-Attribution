@@ -1,6 +1,6 @@
 """
-Training script for text classification models (BERT, RoBERTa).
-Implements the training procedures for IMDB and Yelp datasets.
+Training script for your actual BERT sentiment models.
+Now properly uses BERTSentimentClassifier and BERTSentimentTrainer.
 """
 
 import torch
@@ -11,28 +11,40 @@ import os
 import numpy as np
 from tqdm import tqdm
 import logging
-
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
 
-from ra.model_factory import ModelFactory
+# Add parent directory for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+# Import your actual BERT model implementation
+from ra.models.bert_sentiment import BERTSentimentClassifier, BERTSentimentTrainer
 from ra.dataset_utils import DatasetLoader
 
 
 def train_text_model(dataset_name: str, config: dict):
-    """Train text classification model."""
+    """Train your actual BERT sentiment model."""
     
     # Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"🚀 Training {config['model_name']} on {dataset_name}")
     print(f"Using device: {device}")
     
-    # Create model
-    model = ModelFactory.create_text_model(
+    # Create your actual BERT sentiment model
+    model = BERTSentimentClassifier(
         model_name=config['model_name'],
-        num_classes=config['num_classes']
+        num_classes=config['num_classes'],
+        dropout_rate=config.get('dropout_rate', 0.1),
+        freeze_bert=config.get('freeze_bert', False),
+        use_pooler=config.get('use_pooler', True)
     ).to(device)
     
-    # Setup data
+    print(f"✅ Created {model.__class__.__name__}")
+    model_info = model.get_model_info()
+    print(f"📊 Total parameters: {model_info['total_parameters']:,}")
+    print(f"🔧 Trainable parameters: {model_info['trainable_parameters']:,}")
+    
+    # Setup data using your dataset utilities
     loader = DatasetLoader(config.get('data_dir', './data'))
     
     train_dataloader = loader.create_text_dataloader(
@@ -52,112 +64,126 @@ def train_text_model(dataset_name: str, config: dict):
         shuffle=False
     )
     
-    # Setup training
-    optimizer = AdamW(model.parameters(), lr=config['learning_rate'])
+    print(f"📚 Training batches: {len(train_dataloader)}")
+    print(f"🔍 Validation batches: {len(val_dataloader)}")
     
-    total_steps = len(train_dataloader) * config['epochs']
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=total_steps // 10,
-        num_training_steps=total_steps
+    # Use your BERTSentimentTrainer
+    trainer = BERTSentimentTrainer(
+        model=model,
+        learning_rate=config['learning_rate'],
+        weight_decay=config.get('weight_decay', 0.01),
+        warmup_steps=config.get('warmup_steps', 0)
     )
-    
-    criterion = nn.CrossEntropyLoss()
     
     # Create output directory
     os.makedirs(config['output_dir'], exist_ok=True)
     
-    # Training loop
-    model.train()
+    # Training loop using your trainer
     best_val_acc = 0.0
+    training_history = []
     
     for epoch in range(config['epochs']):
-        print(f"\nEpoch {epoch + 1}/{config['epochs']}")
-        print("-" * 30)
+        print(f"\n{'='*50}")
+        print(f"EPOCH {epoch + 1}/{config['epochs']}")
+        print(f"{'='*50}")
         
-        # Training phase
-        total_loss = 0
-        total_correct = 0
-        total_samples = 0
+        # Training phase using your trainer
+        print("🏋️ Training...")
+        train_metrics = trainer.train_epoch(train_dataloader, device)
         
-        progress_bar = tqdm(train_dataloader, desc="Training")
+        # Validation phase using your trainer
+        print("🔍 Validating...")
+        val_metrics = trainer.evaluate(val_dataloader, device)
         
-        for batch in progress_bar:
-            optimizer.zero_grad()
-            
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
-            
-            outputs = model(input_ids, attention_mask)
-            loss = criterion(outputs, labels)
-            
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            
-            optimizer.step()
-            scheduler.step()
-            
-            total_loss += loss.item()
-            predictions = torch.argmax(outputs, dim=1)
-            total_correct += (predictions == labels).sum().item()
-            total_samples += labels.size(0)
-            
-            # Update progress bar
-            progress_bar.set_postfix({
-                'Loss': f'{loss.item():.4f}',
-                'Acc': f'{total_correct/total_samples:.4f}'
-            })
+        # Log metrics
+        epoch_results = {
+            'epoch': epoch + 1,
+            'train_loss': train_metrics['loss'],
+            'train_accuracy': train_metrics['accuracy'],
+            'val_loss': val_metrics['loss'],
+            'val_accuracy': val_metrics['accuracy'],
+            'learning_rate': trainer.optimizer.param_groups[0]['lr']
+        }
+        training_history.append(epoch_results)
         
-        train_acc = total_correct / total_samples
-        avg_train_loss = total_loss / len(train_dataloader)
-        
-        # Validation phase
-        model.eval()
-        val_loss = 0
-        val_correct = 0
-        val_samples = 0
-        
-        with torch.no_grad():
-            for batch in tqdm(val_dataloader, desc="Validation"):
-                input_ids = batch['input_ids'].to(device)
-                attention_mask = batch['attention_mask'].to(device)
-                labels = batch['labels'].to(device)
-                
-                outputs = model(input_ids, attention_mask)
-                loss = criterion(outputs, labels)
-                
-                val_loss += loss.item()
-                predictions = torch.argmax(outputs, dim=1)
-                val_correct += (predictions == labels).sum().item()
-                val_samples += labels.size(0)
-        
-        val_acc = val_correct / val_samples
-        avg_val_loss = val_loss / len(val_dataloader)
-        
-        print(f"Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}")
-        print(f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        print(f"📊 Train Loss: {train_metrics['loss']:.4f}, Train Acc: {train_metrics['accuracy']:.4f}")
+        print(f"📈 Val Loss: {val_metrics['loss']:.4f}, Val Acc: {val_metrics['accuracy']:.4f}")
+        print(f"🎯 Learning Rate: {trainer.optimizer.param_groups[0]['lr']:.6f}")
         
         # Save best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+        if val_metrics['accuracy'] > best_val_acc:
+            best_val_acc = val_metrics['accuracy']
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_acc': val_acc,
-                'config': config
+                'optimizer_state_dict': trainer.optimizer.state_dict(),
+                'val_acc': val_metrics['accuracy'],
+                'val_loss': val_metrics['loss'],
+                'config': config,
+                'model_info': model_info,
+                'training_history': training_history
             }
-            torch.save(checkpoint, os.path.join(config['output_dir'], 'best_model.pt'))
-            print(f"New best model saved! Val Acc: {val_acc:.4f}")
+            
+            best_model_path = os.path.join(config['output_dir'], 'best_model.pt')
+            torch.save(checkpoint, best_model_path)
+            print(f"💾 New best model saved! Val Acc: {val_metrics['accuracy']:.4f}")
         
-        model.train()
+        # Save epoch checkpoint
+        if (epoch + 1) % 5 == 0:  # Save every 5 epochs
+            epoch_checkpoint_path = os.path.join(config['output_dir'], f'checkpoint_epoch_{epoch+1}.pt')
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': trainer.optimizer.state_dict(),
+                'scheduler_state_dict': None,
+                'config': config,
+                'training_history': training_history
+            }, epoch_checkpoint_path)
     
-    print(f"\nTraining completed! Best validation accuracy: {best_val_acc:.4f}")
+    # Save final training history
+    history_path = os.path.join(config['output_dir'], 'training_history.json')
+    import json
+    with open(history_path, 'w') as f:
+        json.dump(training_history, f, indent=2)
+    
+    print(f"\n{'='*50}")
+    print(f"🎉 Training completed!")
+    print(f"📊 Best validation accuracy: {best_val_acc:.4f}")
+    print(f"💾 Best model saved to: {best_model_path}")
+    print(f"📈 Training history saved to: {history_path}")
+    print(f"🏷️ Model type: {model.__class__.__name__}")
+    print(f"{'='*50}")
+    
+    return {
+        'best_val_accuracy': best_val_acc,
+        'model_path': best_model_path,
+        'model_type': model.__class__.__name__,
+        'training_history': training_history
+    }
+
+
+def train_multiple_text_models(models_config: dict):
+    """Train multiple text models with your implementations."""
+    
+    results = {}
+    
+    for dataset_name, config in models_config.items():
+        print(f"\n🚀 Starting training for {dataset_name}")
+        try:
+            result = train_text_model(dataset_name, config)
+            results[dataset_name] = result
+            print(f"✅ Successfully trained {dataset_name} model")
+        except Exception as e:
+            print(f"❌ Failed to train {dataset_name} model: {e}")
+            results[dataset_name] = {'error': str(e)}
+    
+    return results
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Example usage with your BERT models
+    
+    # IMDB configuration for your BERT model
     imdb_config = {
         'model_name': 'bert-base-uncased',
         'num_classes': 2,
@@ -165,7 +191,46 @@ if __name__ == "__main__":
         'batch_size': 16,
         'learning_rate': 2e-5,
         'max_length': 512,
-        'output_dir': './checkpoints/bert_imdb'
+        'dropout_rate': 0.1,
+        'weight_decay': 0.01,
+        'output_dir': './checkpoints/bert_imdb',
+        'data_dir': './data'
     }
     
-    train_text_model("imdb", imdb_config)
+    # Yelp configuration for your BERT model  
+    yelp_config = {
+        'model_name': 'roberta-base',  # or roberta-large if you have resources
+        'num_classes': 2,
+        'epochs': 3,
+        'batch_size': 8,
+        'learning_rate': 1e-5,
+        'max_length': 512,
+        'dropout_rate': 0.1,
+        'weight_decay': 0.01,
+        'output_dir': './checkpoints/roberta_yelp',
+        'data_dir': './data'
+    }
+    
+    # Train individual model
+    print("🎯 Training BERT on IMDB with your implementation...")
+    imdb_result = train_text_model("imdb", imdb_config)
+    
+    # Or train multiple models
+    models_config = {
+        'imdb': imdb_config,
+        'yelp': yelp_config
+    }
+    
+    print("\n🎯 Training all text models with your implementations...")
+    all_results = train_multiple_text_models(models_config)
+    
+    print("\n📊 TRAINING SUMMARY")
+    print("="*50)
+    for dataset, result in all_results.items():
+        if 'error' not in result:
+            print(f"{dataset.upper()}:")
+            print(f"  ✅ Model Type: {result['model_type']}")
+            print(f"  📈 Best Accuracy: {result['best_val_accuracy']:.4f}")
+            print(f"  💾 Saved to: {result['model_path']}")
+        else:
+            print(f"{dataset.upper()}: ❌ {result['error']}")
