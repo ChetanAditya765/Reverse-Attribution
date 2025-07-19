@@ -50,7 +50,7 @@ python-dotenv==1.0.0
 
 # Streamlit Extensions
 streamlit-ace==0.1.1
-plotly-dash==2.14.0
+dash==2.14.0
 
 # Additional ML Libraries
 optuna==3.4.0

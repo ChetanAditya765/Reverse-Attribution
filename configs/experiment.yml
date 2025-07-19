@@ -1,0 +1,34 @@
+checkpoints_dir: ./checkpoints
+data_dir: ./data
+device: cuda
+results_dir: ./results
+seed: 42
+text_models:
+  imdb:
+    batch_size: 16
+    epochs: 3
+    learning_rate: 2.0e-05
+    max_length: 512
+    model_class: BERTSentimentClassifier
+    model_name: bert-base-uncased
+    num_classes: 2
+    output_dir: ./checkpoints/bert_imdb
+  yelp:
+    batch_size: 8
+    epochs: 3
+    learning_rate: 1.0e-05
+    max_length: 512
+    model_class: BERTSentimentClassifier
+    model_name: roberta-base
+    num_classes: 2
+    output_dir: ./checkpoints/roberta_yelp
+vision_models:
+  cifar10:
+    architecture: resnet56
+    batch_size: 128
+    epochs: 200
+    learning_rate: 0.1
+    model_class: ResNetCIFAR
+    num_classes: 10
+    output_dir: ./checkpoints/resnet56_cifar10
+    weight_decay: 0.0001

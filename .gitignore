@@ -74,13 +74,7 @@ Thumbs.db
 *.pt
 *.pth
 *.tflite
-models/
-checkpoints/
-runs/
-logs/
-saved_models/
-data/
-datasets/
+
 
 # Streamlit
 .streamlit/
