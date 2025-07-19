@@ -1,164 +1,247 @@
 """
-Model Factory for creating and loading different model architectures.
-Supports BERT, RoBERTa for text and ResNet for vision tasks.
+Model Factory that properly integrates with your actual model implementations.
+Now correctly imports and uses your BERTSentimentClassifier and ResNetCIFAR models.
 """
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer, AutoModelForSequenceClassification
-from torchvision import models
 import os
-from typing import Tuple, Optional
+from typing import Optional, Union, Dict, Any
+from pathlib import Path
+import sys
 
+# Add models directory to path to import your actual models
+models_path = Path(__file__).parent.parent / "models"
+sys.path.insert(0, str(models_path))
 
-class TextClassifier(nn.Module):
-    """Wrapper for HuggingFace text classification models."""
-    
-    def __init__(self, model_name: str, num_classes: int, max_length: int = 512):
-        super().__init__()
-        self.model_name = model_name
-        self.max_length = max_length
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name, 
-            num_labels=num_classes
-        )
-        
-    def forward(self, input_ids, attention_mask=None):
-        outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        return outputs.logits
-    
-    def encode_text(self, texts):
-        """Tokenize and encode text inputs."""
-        if isinstance(texts, str):
-            texts = [texts]
-            
-        encoded = self.tokenizer(
-            texts,
-            truncation=True,
-            padding=True,
-            max_length=self.max_length,
-            return_tensors="pt"
-        )
-        return encoded
+# Import your actual model implementations
+try:
+    from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
+    BERT_AVAILABLE = True
+except ImportError:
+    BERT_AVAILABLE = False
+    print("⚠️ BERT sentiment model not found in models/")
 
+try:
+    from models.resnet_cifar import ResNetCIFAR, resnet56_cifar, resnet20_cifar, resnet32_cifar
+    RESNET_AVAILABLE = True
+except ImportError:
+    RESNET_AVAILABLE = False
+    print("⚠️ ResNet CIFAR models not found in models/")
 
-class VisionClassifier(nn.Module):
-    """ResNet-based classifier for vision tasks."""
-    
-    def __init__(self, num_classes: int = 10, architecture: str = "resnet56"):
-        super().__init__()
-        
-        if architecture == "resnet56":
-            self.model = self._make_resnet56(num_classes)
-        else:
-            # Use pretrained ResNet from torchvision
-            self.model = models.resnet50(pretrained=True)
-            self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
-    
-    def forward(self, x):
-        return self.model(x)
-    
-    def _make_resnet56(self, num_classes: int):
-        """Create ResNet-56 architecture for CIFAR-10."""
-        
-        class BasicBlock(nn.Module):
-            expansion = 1
-            
-            def __init__(self, in_planes, planes, stride=1):
-                super().__init__()
-                self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, 
-                                     stride=stride, padding=1, bias=False)
-                self.bn1 = nn.BatchNorm2d(planes)
-                self.conv2 = nn.Conv2d(planes, planes, kernel_size=3,
-                                     stride=1, padding=1, bias=False)
-                self.bn2 = nn.BatchNorm2d(planes)
-                
-                self.shortcut = nn.Sequential()
-                if stride != 1 or in_planes != planes:
-                    self.shortcut = nn.Sequential(
-                        nn.Conv2d(in_planes, planes, kernel_size=1,
-                                stride=stride, bias=False),
-                        nn.BatchNorm2d(planes)
-                    )
-            
-            def forward(self, x):
-                out = torch.relu(self.bn1(self.conv1(x)))
-                out = self.bn2(self.conv2(out))
-                out += self.shortcut(x)
-                return torch.relu(out)
-        
-        class ResNet(nn.Module):
-            def __init__(self, block, num_blocks, num_classes):
-                super().__init__()
-                self.in_planes = 16
-                
-                self.conv1 = nn.Conv2d(3, 16, kernel_size=3, 
-                                     stride=1, padding=1, bias=False)
-                self.bn1 = nn.BatchNorm2d(16)
-                self.layer1 = self._make_layer(block, 16, num_blocks[0], stride=1)
-                self.layer2 = self._make_layer(block, 32, num_blocks[1], stride=2)
-                self.layer3 = self._make_layer(block, 64, num_blocks[2], stride=2)
-                self.linear = nn.Linear(64, num_classes)
-            
-            def _make_layer(self, block, planes, num_blocks, stride):
-                strides = [stride] + [1] * (num_blocks - 1)
-                layers = []
-                for stride in strides:
-                    layers.append(block(self.in_planes, planes, stride))
-                    self.in_planes = planes * block.expansion
-                return nn.Sequential(*layers)
-            
-            def forward(self, x):
-                out = torch.relu(self.bn1(self.conv1(x)))
-                out = self.layer1(out)
-                out = self.layer2(out)
-                out = self.layer3(out)
-                out = torch.avg_pool2d(out, 8)
-                out = out.view(out.size(0), -1)
-                out = self.linear(out)
-                return out
-        
-        return ResNet(BasicBlock, [9, 9, 9], num_classes)
+try:
+    from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
+    CUSTOM_AVAILABLE = True
+except ImportError:
+    CUSTOM_AVAILABLE = False
+    print("⚠️ Custom model examples not found in models/")
 
 
 class ModelFactory:
-    """Factory class for creating different model types."""
+    """
+    Factory class that creates instances of your actual model implementations.
+    """
     
     @staticmethod
     def create_text_model(
         model_name: str = "bert-base-uncased",
         num_classes: int = 2,
-        checkpoint_path: Optional[str] = None
-    ) -> TextClassifier:
-        """Create text classification model."""
-        model = TextClassifier(model_name, num_classes)
+        checkpoint_path: Optional[str] = None,
+        model_type: str = "bert_sentiment",
+        **kwargs
+    ) -> nn.Module:
+        """
+        Create text classification model using your actual implementations.
         
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        Args:
+            model_name: HuggingFace model name or custom model identifier
+            num_classes: Number of output classes
+            checkpoint_path: Path to saved model weights
+            model_type: Type of model ("bert_sentiment", "custom_text")
+            **kwargs: Additional model arguments
             
-        return model
+        Returns:
+            Your actual model instance
+        """
+        
+        if model_type == "bert_sentiment" and BERT_AVAILABLE:
+            # Use your BERTSentimentClassifier
+            model = BERTSentimentClassifier(
+                model_name=model_name,
+                num_classes=num_classes,
+                **kwargs
+            )
+            
+            # Load checkpoint if provided
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    model.load_state_dict(checkpoint)
+            
+            return model
+            
+        elif model_type == "custom_text" and CUSTOM_AVAILABLE:
+            # Use your CustomTextClassifier
+            model = CustomTextClassifier(
+                num_classes=num_classes,
+                **kwargs
+            )
+            
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+            
+            return model
+            
+        else:
+            raise ValueError(f"Model type '{model_type}' not available or not implemented")
     
     @staticmethod
     def create_vision_model(
-        num_classes: int = 10,
         architecture: str = "resnet56",
-        checkpoint_path: Optional[str] = None
-    ) -> VisionClassifier:
-        """Create vision classification model."""
-        model = VisionClassifier(num_classes, architecture)
+        num_classes: int = 10,
+        checkpoint_path: Optional[str] = None,
+        model_type: str = "resnet_cifar",
+        **kwargs
+    ) -> nn.Module:
+        """
+        Create vision classification model using your actual implementations.
         
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        Args:
+            architecture: Model architecture ("resnet56", "resnet20", etc.)
+            num_classes: Number of output classes
+            checkpoint_path: Path to saved model weights
+            model_type: Type of model ("resnet_cifar", "custom_vision")
+            **kwargs: Additional model arguments
             
-        return model
+        Returns:
+            Your actual model instance
+        """
+        
+        if model_type == "resnet_cifar" and RESNET_AVAILABLE:
+            # Use your ResNet CIFAR implementations
+            architecture_map = {
+                "resnet20": resnet20_cifar,
+                "resnet32": resnet32_cifar,
+                "resnet56": resnet56_cifar,
+            }
+            
+            if architecture not in architecture_map:
+                raise ValueError(f"Architecture '{architecture}' not supported")
+            
+            model = architecture_map[architecture](num_classes=num_classes, **kwargs)
+            
+            # Load checkpoint if provided
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    model.load_state_dict(checkpoint)
+            
+            return model
+            
+        elif model_type == "custom_vision" and CUSTOM_AVAILABLE:
+            # Use your CustomVisionClassifier
+            model = CustomVisionClassifier(
+                num_classes=num_classes,
+                **kwargs
+            )
+            
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+            
+            return model
+            
+        else:
+            raise ValueError(f"Model type '{model_type}' not available or not implemented")
     
     @staticmethod
-    def load_model(model_type: str, **kwargs) -> nn.Module:
-        """Load model based on type specification."""
-        if model_type.lower() in ['bert', 'roberta', 'text']:
-            return ModelFactory.create_text_model(**kwargs)
-        elif model_type.lower() in ['resnet', 'vision', 'cnn']:
-            return ModelFactory.create_vision_model(**kwargs)
+    def load_model(
+        model_path: str,
+        model_class: str,
+        device: str = "cpu",
+        **model_kwargs
+    ) -> nn.Module:
+        """
+        Load a saved model using your actual model classes.
+        
+        Args:
+            model_path: Path to the saved model
+            model_class: Name of your model class
+            device: Device to load the model on
+            **model_kwargs: Arguments for model initialization
+            
+        Returns:
+            Loaded model instance
+        """
+        
+        # Map model class names to actual classes
+        model_class_map = {}
+        
+        if BERT_AVAILABLE:
+            model_class_map['BERTSentimentClassifier'] = BERTSentimentClassifier
+            
+        if RESNET_AVAILABLE:
+            model_class_map['ResNetCIFAR'] = ResNetCIFAR
+            
+        if CUSTOM_AVAILABLE:
+            model_class_map['CustomTextClassifier'] = CustomTextClassifier
+            model_class_map['CustomVisionClassifier'] = CustomVisionClassifier
+        
+        if model_class not in model_class_map:
+            raise ValueError(f"Model class '{model_class}' not found or not available")
+        
+        # Create model instance
+        ModelClass = model_class_map[model_class]
+        model = ModelClass(**model_kwargs)
+        
+        # Load weights
+        checkpoint = torch.load(model_path, map_location=device)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
+            model.load_state_dict(checkpoint)
+        
+        return model.to(device)
+    
+    @staticmethod
+    def get_available_models() -> Dict[str, list]:
+        """Get list of available model implementations."""
+        available = {
+            'text_models': [],
+            'vision_models': [],
+            'custom_models': []
+        }
+        
+        if BERT_AVAILABLE:
+            available['text_models'].append('bert_sentiment')
+            
+        if RESNET_AVAILABLE:
+            available['vision_models'].extend(['resnet20', 'resnet32', 'resnet56'])
+            
+        if CUSTOM_AVAILABLE:
+            available['custom_models'].extend(['custom_text', 'custom_vision'])
+        
+        return available
+
+
+# Convenience functions that work with your models
+def create_bert_model(model_name: str = "bert-base-uncased", **kwargs):
+    """Convenience function to create your BERT sentiment model."""
+    return ModelFactory.create_text_model(
+        model_name=model_name,
+        model_type="bert_sentiment",
+        **kwargs
+    )
+
+
+def create_resnet56_model(num_classes: int = 10, **kwargs):
+    """Convenience function to create your ResNet-56 CIFAR model."""
+    return ModelFactory.create_vision_model(
+        architecture="resnet56",
+        num_classes=num_classes,
+        model_type="resnet_cifar",
+        **kwargs
+    )
