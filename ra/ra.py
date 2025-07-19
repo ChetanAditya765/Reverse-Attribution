@@ -7,7 +7,7 @@ Author: Chetan Aditya Lakka
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Tuple, Optional, Union
 from captum.attr import IntegratedGradients, LayerIntegratedGradients
 
 
