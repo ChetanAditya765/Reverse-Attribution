@@ -319,23 +319,19 @@ class BERTSentimentTrainer:
     def evaluate(
         self,
         dataloader: torch.utils.data.DataLoader,
-        device: str = None
+        device: str = "cpu"
     ) -> Dict[str, float]:
         """Evaluate the model."""
-        from ra.device_utils import device as auto_device
-        device = device or auto_device
-    
         self.model.eval()
         total_loss = 0.0
         correct_predictions = 0
         total_samples = 0
-    
+        
         with torch.no_grad():
             for batch in dataloader:
-                input_ids = batch['input_ids'].to(device, non_blocking=True)
-                attention_mask = batch['attention_mask'].to(device, non_blocking=True)
-                labels = batch['labels'].to(device, non_blocking=True)
-
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+                labels = batch['labels'].to(device)
                 
                 logits = self.model(input_ids, attention_mask)
                 loss = self.criterion(logits, labels)

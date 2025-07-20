@@ -71,4 +71,4 @@ try:
     __version__ = _pkg_version("reverse-attribution")
 except Exception:
     __version__ = "0.0.0.dev"
-from ra.utils.device import device, to_device   # re-export
+from ra.device_utils import device, to_device   # re-export
