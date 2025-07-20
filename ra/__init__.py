@@ -36,8 +36,6 @@ from .visualizer import ExplanationVisualizer
 # User studies
 from .user_study import (
     UserStudySession,
-    TrustCalibrationStudy,
-    DebuggingTimeStudy,
     UserStudyAnalyzer,
 )
 
@@ -65,8 +63,6 @@ __all__ = [
     "metrics",
     "ExplanationVisualizer",
     "UserStudySession",
-    "TrustCalibrationStudy",
-    "DebuggingTimeStudy",
     "UserStudyAnalyzer",
     "__version__",
 ]
@@ -75,3 +71,4 @@ try:
     __version__ = _pkg_version("reverse-attribution")
 except Exception:
     __version__ = "0.0.0.dev"
+from ra.utils.device import device, to_device   # re-export

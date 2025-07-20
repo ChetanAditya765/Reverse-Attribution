@@ -17,7 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ra.ra import ReverseAttribution
 from ra.model_factory import ModelFactory
-from visualizer import ExplanationVisualizer
+from ra.visualizer import ExplanationVisualizer
 
 
 class CustomTextClassifier(nn.Module):

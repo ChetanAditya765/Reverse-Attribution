@@ -1,0 +1,8 @@
+{
+  "imdb": {
+    "error": "Invalid pattern: '**' can only be an entire path component"
+  },
+  "yelp": {
+    "error": "Invalid pattern: '**' can only be an entire path component"
+  }
+}

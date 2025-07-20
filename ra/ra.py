@@ -29,8 +29,10 @@ class ReverseAttribution:
         """
         Initialize RA explainer with proper model detection.
         """
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        from ra.device_utils import device as auto_device
+        self.device = device or auto_device
         self.model = model.to(self.device).eval()
+
         self.baseline = baseline
         self.model_type = self._detect_model_type()
         

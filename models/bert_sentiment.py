@@ -26,16 +26,23 @@ class BERTSentimentClassifier(nn.Module):
         use_pooler: bool = True
     ):
         super().__init__()
-        
+
+        # Import device after initialization
+        from ra.device_utils import device
+        self.device = device
+    
         self.model_name = model_name
         self.num_classes = num_classes
         self.use_pooler = use_pooler
-        
+
         # Load BERT configuration and model
         self.config = AutoConfig.from_pretrained(model_name)
         self.bert = AutoModel.from_pretrained(model_name)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
+    
+        # Move model to GPU
+        self.to(self.device)
+
         # Freeze BERT parameters if requested
         if freeze_bert:
             for param in self.bert.parameters():
@@ -78,6 +85,15 @@ class BERTSentimentClassifier(nn.Module):
         token_type_ids: Optional[torch.Tensor] = None,
         return_hidden_states: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Forward pass through the model.
+        """
+        # Move inputs to device
+        input_ids = input_ids.to(self.device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(self.device)
+        if token_type_ids is not None:
+            token_type_ids = token_type_ids.to(self.device)
         """
         Forward pass through the model.
         
@@ -254,19 +270,24 @@ class BERTSentimentTrainer:
     def train_epoch(
         self,
         dataloader: torch.utils.data.DataLoader,
-        device: str = "cpu"
+        device: str = None
     ) -> Dict[str, float]:
         """Train for one epoch."""
+        from ra.device_utils import device as auto_device
+        device = device or auto_device
+    
         self.model.train()
         total_loss = 0.0
         correct_predictions = 0
         total_samples = 0
+    
         
         for batch in dataloader:
-            # Move batch to device
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            labels = batch['labels'].to(device)
+        # Move batch to device
+            input_ids = batch['input_ids'].to(device, non_blocking=True)
+            attention_mask = batch['attention_mask'].to(device, non_blocking=True)
+            labels = batch['labels'].to(device, non_blocking=True)
+
             
             # Forward pass
             self.optimizer.zero_grad()
@@ -298,19 +319,23 @@ class BERTSentimentTrainer:
     def evaluate(
         self,
         dataloader: torch.utils.data.DataLoader,
-        device: str = "cpu"
+        device: str = None
     ) -> Dict[str, float]:
         """Evaluate the model."""
+        from ra.device_utils import device as auto_device
+        device = device or auto_device
+    
         self.model.eval()
         total_loss = 0.0
         correct_predictions = 0
         total_samples = 0
-        
+    
         with torch.no_grad():
             for batch in dataloader:
-                input_ids = batch['input_ids'].to(device)
-                attention_mask = batch['attention_mask'].to(device)
-                labels = batch['labels'].to(device)
+                input_ids = batch['input_ids'].to(device, non_blocking=True)
+                attention_mask = batch['attention_mask'].to(device, non_blocking=True)
+                labels = batch['labels'].to(device, non_blocking=True)
+
                 
                 logits = self.model(input_ids, attention_mask)
                 loss = self.criterion(logits, labels)

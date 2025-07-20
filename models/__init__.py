@@ -3,18 +3,19 @@
 """
 Top-level models package for Reverse Attribution.
 
-Re-exports implementations from ra/models so scripts can import via `models.*`.
+Re-exports implementations from ra.models so that scripts
+can import via `models.*` without changing existing code.
 """
 
 # BERT-based sentiment models
-from ra.models.bert_sentiment import (
+from models.bert_sentiment import (
     BERTSentimentClassifier,
     BERTSentimentTrainer,
     create_bert_sentiment_model,
 )
 
 # ResNet CIFAR implementations
-from ra.models.resnet_cifar import (
+from models.resnet_cifar import (
     ResNetCIFAR,
     BasicBlock,
     Bottleneck,
@@ -29,7 +30,7 @@ from ra.models.resnet_cifar import (
 )
 
 # Custom model examples
-from ra.models.custom_model_example import (
+from models.custom_model_example import (
     CustomTextClassifier,
     CustomVisionClassifier,
     CustomModelWrapper,

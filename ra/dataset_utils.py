@@ -131,7 +131,8 @@ class DatasetLoader:
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=4 if torch.cuda.is_available() else 0
+            num_workers=4 if torch.cuda.is_available() else 0,
+            pin_memory=True
         )
     
     def create_vision_dataloader(
@@ -148,7 +149,8 @@ class DatasetLoader:
             dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=4 if torch.cuda.is_available() else 0
+            num_workers=4 if torch.cuda.is_available() else 0,
+            pin_memory=True
         )
 
 

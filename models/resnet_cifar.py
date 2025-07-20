@@ -151,9 +151,14 @@ class ResNetCIFAR(nn.Module):
         zero_init_residual: bool = False
     ):
         super(ResNetCIFAR, self).__init__()
-        
+    
+        # Import device after initialization
+        from ra.device_utils import device
+        self.device = device
+    
         self.num_classes = num_classes
         self.inplanes = 16  # Start with 16 channels for CIFAR
+        # Start with 16 channels for CIFAR
         
         # Initial convolution layer (3x3 instead of 7x7 for CIFAR)
         self.conv1 = nn.Conv2d(
@@ -173,6 +178,8 @@ class ResNetCIFAR(nn.Module):
         # Initialize weights
         self._init_weights(zero_init_residual)
     
+        # Move model to GPU
+        self.to(self.device)    
     def _make_layer(
         self,
         block: nn.Module,
@@ -231,6 +238,8 @@ class ResNetCIFAR(nn.Module):
         Returns:
             logits: Classification logits [batch_size, num_classes]
         """
+        # Move input to device
+        x = x.to(self.device)
         # Initial convolution
         x = self.conv1(x)
         x = self.bn1(x)
