@@ -14,27 +14,44 @@ import sys
 models_path = Path(__file__).parent.parent / "models"
 sys.path.insert(0, str(models_path))
 
-# Import your actual model implementations
-try:
-    from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
-    BERT_AVAILABLE = True
-except ImportError:
-    BERT_AVAILABLE = False
-    print("⚠️ BERT sentiment model not found in models/")
+# Import unified model checking system
+from ra.model_utils import unified_model_check, validate_model_for_training
+import warnings
 
-try:
-    from models.resnet_cifar import ResNetCIFAR, resnet56_cifar, resnet20_cifar, resnet32_cifar
-    RESNET_AVAILABLE = True
-except ImportError:
-    RESNET_AVAILABLE = False
-    print("⚠️ ResNet CIFAR models not found in models/")
+# Suppress transformers warnings that clutter output
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+warnings.filterwarnings("ignore", message="resume_download is deprecated")
 
-try:
-    from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
-    CUSTOM_AVAILABLE = True
-except ImportError:
-    CUSTOM_AVAILABLE = False
-    print("⚠️ Custom model examples not found in models/")
+# Silent model imports - no contradictory warnings
+def _import_models():
+    """Import models silently - availability checked by unified system."""
+    models = {}
+    
+    try:
+        from models.bert_sentiment import BERTSentimentClassifier, create_bert_sentiment_model
+        models['bert'] = {'BERTSentimentClassifier': BERTSentimentClassifier, 
+                         'create_bert_sentiment_model': create_bert_sentiment_model}
+    except ImportError:
+        pass
+    
+    try:
+        from models.resnet_cifar import ResNetCIFAR, resnet56_cifar, resnet20_cifar, resnet32_cifar
+        models['resnet'] = {'ResNetCIFAR': ResNetCIFAR, 'resnet56_cifar': resnet56_cifar,
+                           'resnet20_cifar': resnet20_cifar, 'resnet32_cifar': resnet32_cifar}
+    except ImportError:
+        pass
+    
+    try:
+        from models.custom_model_example import CustomTextClassifier, CustomVisionClassifier
+        models['custom'] = {'CustomTextClassifier': CustomTextClassifier, 
+                           'CustomVisionClassifier': CustomVisionClassifier}
+    except ImportError:
+        pass
+    
+    return models
+
+_MODELS = _import_models()
+
 
 
 class ModelFactory:
@@ -50,6 +67,43 @@ class ModelFactory:
         model_type: str = "bert_sentiment",
         **kwargs
     ) -> nn.Module:
+        """Create text model with unified validation."""
+    
+        # Validate availability using unified system
+        validate_model_for_training(model_type)
+    
+        if model_type == "bert_sentiment":
+            if 'bert' not in _MODELS:
+                raise RuntimeError("BERT sentiment model classes not available")
+        
+            BERTSentimentClassifier = _MODELS['bert']['BERTSentimentClassifier']
+            model = BERTSentimentClassifier(model_name=model_name, num_classes=num_classes, **kwargs)
+        
+            # Load checkpoint if provided
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    model.load_state_dict(checkpoint)
+        
+            return model
+    
+        elif model_type == "custom_text":
+            if 'custom' not in _MODELS:
+                raise RuntimeError("Custom text model classes not available")
+            
+            CustomTextClassifier = _MODELS['custom']['CustomTextClassifier']
+            model = CustomTextClassifier(num_classes=num_classes, **kwargs)
+        
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        
+            return model
+    
+        else:
+            raise ValueError(f"Model type '{model_type}' not available or not implemented")
+
         """
         Create text classification model using your actual implementations.
         
@@ -105,6 +159,51 @@ class ModelFactory:
         model_type: str = "resnet_cifar",
         **kwargs
     ) -> nn.Module:
+        """Create vision model with unified validation."""
+    
+        # Validate availability using unified system
+        validate_model_for_training(model_type)
+    
+        if model_type == "resnet_cifar":
+            if 'resnet' not in _MODELS:
+                raise RuntimeError("ResNet CIFAR model classes not available")
+        
+            architecture_map = {
+                "resnet20": _MODELS['resnet']['resnet20_cifar'],
+                "resnet32": _MODELS['resnet']['resnet32_cifar'],
+                "resnet56": _MODELS['resnet']['resnet56_cifar'],
+            }
+        
+            if architecture not in architecture_map:
+                raise ValueError(f"Architecture '{architecture}' not supported")
+        
+            model = architecture_map[architecture](num_classes=num_classes, **kwargs)
+        
+            # Load checkpoint if provided
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                checkpoint = torch.load(checkpoint_path, map_location='cpu')
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                else:
+                    model.load_state_dict(checkpoint)
+        
+            return model
+    
+        elif model_type == "custom_vision":
+            if 'custom' not in _MODELS:
+                raise RuntimeError("Custom vision model classes not available")
+            
+            CustomVisionClassifier = _MODELS['custom']['CustomVisionClassifier']
+            model = CustomVisionClassifier(num_classes=num_classes, **kwargs)
+        
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                model.load_state_dict(torch.load(checkpoint_path, map_location='cpu'))
+        
+            return model
+    
+        else:
+            raise ValueError(f"Model type '{model_type}' not available or not implemented")
+
         """
         Create vision classification model using your actual implementations.
         
@@ -157,74 +256,100 @@ class ModelFactory:
         else:
             raise ValueError(f"Model type '{model_type}' not available or not implemented")
     
-    @staticmethod
-    def load_model(
-        model_path: str,
-        model_class: str,
-        device: str = "cpu",
-        **model_kwargs
-    ) -> nn.Module:
-        """
-        Load a saved model using your actual model classes.
-        
-        Args:
-            model_path: Path to the saved model
-            model_class: Name of your model class
-            device: Device to load the model on
-            **model_kwargs: Arguments for model initialization
-            
-        Returns:
-            Loaded model instance
-        """
-        
-        # Map model class names to actual classes
-        model_class_map = {}
-        
-        if BERT_AVAILABLE:
-            model_class_map['BERTSentimentClassifier'] = BERTSentimentClassifier
-            
-        if RESNET_AVAILABLE:
-            model_class_map['ResNetCIFAR'] = ResNetCIFAR
-            
-        if CUSTOM_AVAILABLE:
-            model_class_map['CustomTextClassifier'] = CustomTextClassifier
-            model_class_map['CustomVisionClassifier'] = CustomVisionClassifier
-        
-        if model_class not in model_class_map:
-            raise ValueError(f"Model class '{model_class}' not found or not available")
-        
-        # Create model instance
-        ModelClass = model_class_map[model_class]
-        model = ModelClass(**model_kwargs)
-        
-        # Load weights
-        checkpoint = torch.load(model_path, map_location=device)
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
-        
-        return model.to(device)
+@staticmethod
+def load_model(
+    model_path: str,
+    model_class: str,
+    device: str = "cpu",
+    **model_kwargs
+) -> nn.Module:
+    """
+    Load a saved model using unified model checking system.
     
-    @staticmethod
-    def get_available_models() -> Dict[str, list]:
-        """Get list of available model implementations."""
-        available = {
-            'text_models': [],
-            'vision_models': [],
-            'custom_models': []
-        }
+    Args:
+        model_path: Path to the saved model
+        model_class: Name of your model class
+        device: Device to load the model on
+        **model_kwargs: Arguments for model initialization
         
-        if BERT_AVAILABLE:
+    Returns:
+        Loaded model instance
+    """
+    from ra.model_utils import unified_model_check
+    
+    # Map model class names to model types for validation
+    class_to_model_type = {
+        'BERTSentimentClassifier': 'bert_sentiment',
+        'ResNetCIFAR': 'resnet_cifar',
+        'CustomTextClassifier': 'custom_models',
+        'CustomVisionClassifier': 'custom_models'
+    }
+    
+    if model_class not in class_to_model_type:
+        raise ValueError(f"Unknown model class '{model_class}'. Supported classes: {list(class_to_model_type.keys())}")
+    
+    # Validate model availability using unified system
+    model_type = class_to_model_type[model_class]
+    status = unified_model_check(model_type)
+    
+    if not status['available']:
+        raise ValueError(f"Model class '{model_class}' not available. Error: {status['error']}")
+    
+    # Build model class mapping only for available models
+    model_class_map = {}
+    
+    # Import classes only if they're available
+    if model_class in ['BERTSentimentClassifier'] and 'bert' in _MODELS:
+        model_class_map['BERTSentimentClassifier'] = _MODELS['bert']['BERTSentimentClassifier']
+    
+    if model_class in ['ResNetCIFAR'] and 'resnet' in _MODELS:
+        model_class_map['ResNetCIFAR'] = _MODELS['resnet']['ResNetCIFAR']
+    
+    if model_class in ['CustomTextClassifier', 'CustomVisionClassifier'] and 'custom' in _MODELS:
+        model_class_map['CustomTextClassifier'] = _MODELS['custom']['CustomTextClassifier']
+        model_class_map['CustomVisionClassifier'] = _MODELS['custom']['CustomVisionClassifier']
+    
+    if model_class not in model_class_map:
+        raise ValueError(f"Model class '{model_class}' not found in available implementations")
+    
+    # Create model instance
+    ModelClass = model_class_map[model_class]
+    model = ModelClass(**model_kwargs)
+    
+    # Load weights
+    checkpoint = torch.load(model_path, map_location=device)
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    else:
+        model.load_state_dict(checkpoint)
+    
+    return model.to(device)
+    
+@staticmethod
+def get_available_models() -> Dict[str, list]:
+    """Get list of available model implementations using unified checking."""
+    from ra.model_utils import list_available_models
+    
+    available = {
+        'text_models': [],
+        'vision_models': [],
+        'custom_models': []
+    }
+    
+    # Get available models from unified system
+    available_model_names = list_available_models()
+    
+    # Categorize available models
+    for model_name in available_model_names:
+        if model_name == 'bert_sentiment':
             available['text_models'].append('bert_sentiment')
-            
-        if RESNET_AVAILABLE:
+        elif model_name == 'resnet_cifar':
             available['vision_models'].extend(['resnet20', 'resnet32', 'resnet56'])
-            
-        if CUSTOM_AVAILABLE:
+        elif model_name == 'custom_models':
             available['custom_models'].extend(['custom_text', 'custom_vision'])
-        
-        return available
+    
+    return available
+
 
 
 # Convenience functions that work with your models

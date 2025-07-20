@@ -1,709 +1,383 @@
 """
-Utility functions for model operations including loading, saving, 
-preprocessing, and inference helpers.
+Unified Model Utilities for Reverse Attribution Framework
+========================================================
+
+This module provides centralized model availability checking, validation,
+and status reporting to eliminate contradictory availability messages
+throughout the codebase.
+
+Features:
+- Unified model checking across all components
+- GPU integration with automatic device detection  
+- Checkpoint discovery and validation
+- Comprehensive status reporting
+- Silent failure handling with detailed diagnostics
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel
-import numpy as np
 import os
-import json
-import pickle
-from typing import Dict, List, Tuple, Optional, Any, Union
-import logging
+import sys
+import torch
+import warnings
 from pathlib import Path
-import yaml
+from typing import Dict, List, Optional, Union, Tuple, Any
+from dataclasses import dataclass
+import logging
+
+# Suppress transformers warnings that clutter output
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
+warnings.filterwarnings("ignore", message="resume_download is deprecated")
+
+# Setup logging for debugging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 
-class ModelCheckpointManager:
+@dataclass
+class ModelStatus:
+    """Comprehensive model status information."""
+    name: str
+    available: bool
+    can_instantiate: bool
+    has_checkpoints: bool
+    checkpoint_paths: List[str]
+    class_importable: bool
+    error_message: Optional[str] = None
+    device_compatible: bool = True
+
+
+class UnifiedModelChecker:
     """
-    Manages model checkpoints including saving, loading, and versioning.
-    """
-    
-    def __init__(self, checkpoint_dir: str = "./checkpoints"):
-        self.checkpoint_dir = Path(checkpoint_dir)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
-    def save_checkpoint(
-        self,
-        model: nn.Module,
-        optimizer: torch.optim.Optimizer = None,
-        scheduler: torch.optim.lr_scheduler._LRScheduler = None,
-        epoch: int = 0,
-        metrics: Dict[str, float] = None,
-        model_name: str = "model",
-        is_best: bool = False,
-        additional_info: Dict[str, Any] = None
-    ) -> str:
-        """
-        Save model checkpoint with metadata.
-        
-        Args:
-            model: PyTorch model to save
-            optimizer: Optimizer state
-            scheduler: Learning rate scheduler
-            epoch: Current epoch
-            metrics: Performance metrics
-            model_name: Name for the checkpoint
-            is_best: Whether this is the best model so far
-            additional_info: Any additional information to save
-            
-        Returns:
-            Path to saved checkpoint
-        """
-        checkpoint_data = {
-            'model_state_dict': model.state_dict(),
-            'epoch': epoch,
-            'metrics': metrics or {},
-            'model_architecture': str(model),
-            'timestamp': torch.tensor([0]).item(),  # Simple timestamp placeholder
-        }
-        
-        if optimizer:
-            checkpoint_data['optimizer_state_dict'] = optimizer.state_dict()
-        
-        if scheduler:
-            checkpoint_data['scheduler_state_dict'] = scheduler.state_dict()
-            
-        if additional_info:
-            checkpoint_data.update(additional_info)
-        
-        # Create model-specific directory
-        model_dir = self.checkpoint_dir / model_name
-        model_dir.mkdir(exist_ok=True)
-        
-        # Save regular checkpoint
-        checkpoint_path = model_dir / f"checkpoint_epoch_{epoch}.pt"
-        torch.save(checkpoint_data, checkpoint_path)
-        
-        # Save as best model if specified
-        if is_best:
-            best_path = model_dir / "best_model.pt"
-            torch.save(checkpoint_data, best_path)
-            
-            # Save metadata separately for easy access
-            metadata = {
-                'epoch': epoch,
-                'metrics': metrics,
-                'checkpoint_path': str(checkpoint_path),
-                'timestamp': checkpoint_data['timestamp']
-            }
-            
-            with open(model_dir / "best_model_info.json", 'w') as f:
-                json.dump(metadata, f, indent=2)
-        
-        return str(checkpoint_path)
-    
-    def load_checkpoint(
-        self,
-        checkpoint_path: str,
-        model: nn.Module,
-        optimizer: torch.optim.Optimizer = None,
-        scheduler: torch.optim.lr_scheduler._LRScheduler = None,
-        device: str = "cpu"
-    ) -> Dict[str, Any]:
-        """
-        Load model checkpoint.
-        
-        Args:
-            checkpoint_path: Path to checkpoint file
-            model: Model to load state into
-            optimizer: Optimizer to load state into
-            scheduler: Scheduler to load state into
-            device: Device to load tensors to
-            
-        Returns:
-            Checkpoint metadata
-        """
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        
-        # Load model state
-        model.load_state_dict(checkpoint['model_state_dict'])
-        
-        # Load optimizer state if available
-        if optimizer and 'optimizer_state_dict' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        
-        # Load scheduler state if available
-        if scheduler and 'scheduler_state_dict' in checkpoint:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        
-        return {
-            'epoch': checkpoint.get('epoch', 0),
-            'metrics': checkpoint.get('metrics', {}),
-            'additional_info': {k: v for k, v in checkpoint.items() 
-                              if k not in ['model_state_dict', 'optimizer_state_dict', 'scheduler_state_dict']}
-        }
-    
-    def get_best_checkpoint_path(self, model_name: str) -> Optional[str]:
-        """Get path to best checkpoint for a model."""
-        best_path = self.checkpoint_dir / model_name / "best_model.pt"
-        return str(best_path) if best_path.exists() else None
-    
-    def list_checkpoints(self, model_name: str) -> List[str]:
-        """List all checkpoints for a model."""
-        model_dir = self.checkpoint_dir / model_name
-        if not model_dir.exists():
-            return []
-        
-        return [str(p) for p in model_dir.glob("checkpoint_epoch_*.pt")]
-
-
-class ModelWrapper:
-    """
-    Generic wrapper for PyTorch models with common utilities.
+    Centralized model checking system that provides consistent availability
+    reporting across all components of the Reverse Attribution framework.
     """
     
-    def __init__(
-        self,
-        model: nn.Module,
-        device: str = None,
-        preprocessing_fn: callable = None,
-        postprocessing_fn: callable = None
-    ):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = model.to(self.device).eval()
-        self.preprocessing_fn = preprocessing_fn
-        self.postprocessing_fn = postprocessing_fn
-        
-    def predict(
-        self,
-        inputs: Union[torch.Tensor, np.ndarray, List],
-        return_probabilities: bool = True,
-        batch_size: int = 32
-    ) -> np.ndarray:
-        """
-        Make predictions on inputs.
-        
-        Args:
-            inputs: Input data
-            return_probabilities: Whether to return probabilities or logits
-            batch_size: Batch size for processing
-            
-        Returns:
-            Predictions as numpy array
-        """
-        self.model.eval()
-        
-        # Preprocessing
-        if self.preprocessing_fn:
-            inputs = self.preprocessing_fn(inputs)
-        
-        # Convert to tensor if needed
-        if not isinstance(inputs, torch.Tensor):
-            if isinstance(inputs, np.ndarray):
-                inputs = torch.from_numpy(inputs).float()
-            elif isinstance(inputs, list):
-                inputs = torch.tensor(inputs).float()
-        
-        inputs = inputs.to(self.device)
-        
-        # Process in batches
-        all_outputs = []
-        
-        with torch.no_grad():
-            for i in range(0, len(inputs), batch_size):
-                batch = inputs[i:i+batch_size]
-                outputs = self.model(batch)
-                
-                if return_probabilities:
-                    outputs = F.softmax(outputs, dim=1)
-                
-                all_outputs.append(outputs.cpu())
-        
-        predictions = torch.cat(all_outputs, dim=0).numpy()
-        
-        # Postprocessing
-        if self.postprocessing_fn:
-            predictions = self.postprocessing_fn(predictions)
-        
-        return predictions
-    
-    def predict_single(self, input_sample: Any) -> Dict[str, Any]:
-        """
-        Make prediction on single sample with detailed output.
-        
-        Args:
-            input_sample: Single input sample
-            
-        Returns:
-            Dictionary with prediction details
-        """
-        if isinstance(input_sample, (list, np.ndarray)):
-            input_tensor = torch.tensor([input_sample]).float().to(self.device)
-        elif isinstance(input_sample, torch.Tensor):
-            if input_sample.dim() == 1:
-                input_tensor = input_sample.unsqueeze(0).to(self.device)
-            else:
-                input_tensor = input_sample.to(self.device)
-        else:
-            raise ValueError(f"Unsupported input type: {type(input_sample)}")
-        
-        self.model.eval()
-        
-        with torch.no_grad():
-            logits = self.model(input_tensor)
-            probs = F.softmax(logits, dim=1)
-            
-            predicted_class = torch.argmax(logits, dim=1).item()
-            confidence = probs[0, predicted_class].item()
-            
-            return {
-                'predicted_class': predicted_class,
-                'confidence': confidence,
-                'probabilities': probs[0].cpu().numpy(),
-                'logits': logits[0].cpu().numpy()
-            }
-    
-    def get_model_info(self) -> Dict[str, Any]:
-        """Get information about the wrapped model."""
-        total_params = sum(p.numel() for p in self.model.parameters())
-        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        
-        return {
-            'total_parameters': total_params,
-            'trainable_parameters': trainable_params,
-            'model_architecture': str(self.model),
-            'device': str(self.device),
-            'model_size_mb': total_params * 4 / (1024 * 1024)  # Assuming float32
-        }
-
-
-class TextModelUtils:
-    """
-    Utilities specific to text models (BERT, RoBERTa, etc.).
-    """
-    
-    @staticmethod
-    def create_attention_mask(input_ids: torch.Tensor, pad_token_id: int = 0) -> torch.Tensor:
-        """Create attention mask from input_ids."""
-        return (input_ids != pad_token_id).long()
-    
-    @staticmethod
-    def truncate_sequences(
-        input_ids: torch.Tensor,
-        max_length: int,
-        truncation_strategy: str = "longest_first"
-    ) -> torch.Tensor:
-        """
-        Truncate sequences to maximum length.
-        
-        Args:
-            input_ids: Input token IDs
-            max_length: Maximum sequence length
-            truncation_strategy: How to truncate ('longest_first', 'only_first', 'only_second')
-            
-        Returns:
-            Truncated input_ids
-        """
-        if input_ids.size(1) <= max_length:
-            return input_ids
-        
-        if truncation_strategy == "longest_first":
-            return input_ids[:, :max_length]
-        elif truncation_strategy == "only_first":
-            # Assumes [CLS] token1 [SEP] token2 [SEP] format
-            return input_ids[:, :max_length]
-        else:
-            raise ValueError(f"Unknown truncation strategy: {truncation_strategy}")
-    
-    @staticmethod
-    def extract_embeddings(
-        model: nn.Module,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor = None,
-        layer_index: int = -1
-    ) -> torch.Tensor:
-        """
-        Extract embeddings from transformer model.
-        
-        Args:
-            model: Transformer model
-            input_ids: Input token IDs
-            attention_mask: Attention mask
-            layer_index: Which layer to extract from (-1 for last layer)
-            
-        Returns:
-            Embeddings tensor
-        """
-        model.eval()
-        
-        with torch.no_grad():
-            if hasattr(model, 'bert'):  # BERT-based models
-                if attention_mask is not None:
-                    outputs = model.bert(input_ids, attention_mask=attention_mask, output_hidden_states=True)
-                else:
-                    outputs = model.bert(input_ids, output_hidden_states=True)
-                
-                hidden_states = outputs.hidden_states
-                return hidden_states[layer_index]
-            
-            elif hasattr(model, 'roberta'):  # RoBERTa-based models
-                if attention_mask is not None:
-                    outputs = model.roberta(input_ids, attention_mask=attention_mask, output_hidden_states=True)
-                else:
-                    outputs = model.roberta(input_ids, output_hidden_states=True)
-                
-                hidden_states = outputs.hidden_states
-                return hidden_states[layer_index]
-            
-            else:
-                raise ValueError("Model type not supported for embedding extraction")
-    
-    @staticmethod
-    def create_text_preprocessing_fn(
-        tokenizer: AutoTokenizer,
-        max_length: int = 512
-    ) -> callable:
-        """Create preprocessing function for text inputs."""
-        
-        def preprocess(texts):
-            if isinstance(texts, str):
-                texts = [texts]
-            
-            encoded = tokenizer(
-                texts,
-                truncation=True,
-                padding='max_length',
-                max_length=max_length,
-                return_tensors="pt"
-            )
-            
-            return encoded
-        
-        return preprocess
-
-
-class VisionModelUtils:
-    """
-    Utilities specific to vision models.
-    """
-    
-    @staticmethod
-    def create_vision_preprocessing_fn(
-        mean: List[float] = [0.485, 0.456, 0.406],
-        std: List[float] = [0.229, 0.224, 0.225],
-        size: Tuple[int, int] = (224, 224)
-    ) -> callable:
-        """Create preprocessing function for vision inputs."""
-        
-        def preprocess(images):
-            if isinstance(images, np.ndarray):
-                if images.ndim == 3:  # Single image
-                    images = images[np.newaxis, ...]
-                
-                # Normalize
-                images = images.astype(np.float32) / 255.0
-                
-                # Standardize
-                for i in range(3):  # RGB channels
-                    images[:, :, :, i] = (images[:, :, :, i] - mean[i]) / std[i]
-                
-                # Convert to torch tensor and change dimension order
-                images = torch.from_numpy(images).permute(0, 3, 1, 2)
-            
-            return images
-        
-        return preprocess
-    
-    @staticmethod
-    def extract_feature_maps(
-        model: nn.Module,
-        inputs: torch.Tensor,
-        layer_name: str = None
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Extract feature maps from specific layers.
-        
-        Args:
-            model: Vision model
-            inputs: Input images
-            layer_name: Specific layer name (None for all)
-            
-        Returns:
-            Dictionary of feature maps
-        """
-        feature_maps = {}
-        
-        def hook_fn(name):
-            def hook(module, input, output):
-                feature_maps[name] = output.detach().clone()
-            return hook
-        
-        # Register hooks
-        handles = []
-        for name, module in model.named_modules():
-            if layer_name is None or name == layer_name:
-                handle = module.register_forward_hook(hook_fn(name))
-                handles.append(handle)
-        
-        # Forward pass
-        model.eval()
-        with torch.no_grad():
-            _ = model(inputs)
-        
-        # Remove hooks
-        for handle in handles:
-            handle.remove()
-        
-        return feature_maps
-
-
-class ConfigManager:
-    """
-    Manages configuration files and hyperparameters.
-    """
-    
-    @staticmethod
-    def load_config(config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML or JSON file."""
-        config_path = Path(config_path)
-        
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-        
-        with open(config_path, 'r') as f:
-            if config_path.suffix.lower() in ['.yaml', '.yml']:
-                return yaml.safe_load(f)
-            elif config_path.suffix.lower() == '.json':
-                return json.load(f)
-            else:
-                raise ValueError(f"Unsupported config format: {config_path.suffix}")
-    
-    @staticmethod
-    def save_config(config: Dict[str, Any], config_path: str):
-        """Save configuration to file."""
-        config_path = Path(config_path)
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(config_path, 'w') as f:
-            if config_path.suffix.lower() in ['.yaml', '.yml']:
-                yaml.dump(config, f, default_flow_style=False, indent=2)
-            elif config_path.suffix.lower() == '.json':
-                json.dump(config, f, indent=2)
-            else:
-                raise ValueError(f"Unsupported config format: {config_path.suffix}")
-    
-    @staticmethod
-    def merge_configs(base_config: Dict[str, Any], override_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Recursively merge two configuration dictionaries."""
-        merged = base_config.copy()
-        
-        for key, value in override_config.items():
-            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-                merged[key] = ConfigManager.merge_configs(merged[key], value)
-            else:
-                merged[key] = value
-        
-        return merged
-
-
-def count_parameters(model: nn.Module) -> Dict[str, int]:
-    """
-    Count model parameters.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        Dictionary with parameter counts
-    """
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    
-    return {
-        'total_parameters': total_params,
-        'trainable_parameters': trainable_params,
-        'non_trainable_parameters': total_params - trainable_params
-    }
-
-
-def get_model_size_mb(model: nn.Module) -> float:
-    """Get model size in megabytes."""
-    param_size = 0
-    buffer_size = 0
-    
-    for param in model.parameters():
-        param_size += param.numel() * param.element_size()
-    
-    for buffer in model.buffers():
-        buffer_size += buffer.numel() * buffer.element_size()
-    
-    size_mb = (param_size + buffer_size) / 1024 / 1024
-    return size_mb
-
-
-def freeze_layers(model: nn.Module, layer_names: List[str]):
-    """
-    Freeze specific layers in a model.
-    
-    Args:
-        model: PyTorch model
-        layer_names: List of layer names to freeze
-    """
-    for name, param in model.named_parameters():
-        if any(layer_name in name for layer_name in layer_names):
-            param.requires_grad = False
-            print(f"Frozen layer: {name}")
-
-
-def unfreeze_layers(model: nn.Module, layer_names: List[str]):
-    """
-    Unfreeze specific layers in a model.
-    
-    Args:
-        model: PyTorch model  
-        layer_names: List of layer names to unfreeze
-    """
-    for name, param in model.named_parameters():
-        if any(layer_name in name for layer_name in layer_names):
-            param.requires_grad = True
-            print(f"Unfrozen layer: {name}")
-
-
-def initialize_weights(model: nn.Module, init_type: str = "xavier"):
-    """
-    Initialize model weights.
-    
-    Args:
-        model: PyTorch model
-        init_type: Type of initialization ('xavier', 'kaiming', 'normal')
-    """
-    for module in model.modules():
-        if isinstance(module, (nn.Linear, nn.Conv2d)):
-            if init_type == "xavier":
-                nn.init.xavier_uniform_(module.weight)
-            elif init_type == "kaiming":
-                nn.init.kaiming_uniform_(module.weight)
-            elif init_type == "normal":
-                nn.init.normal_(module.weight, 0, 0.01)
-            
-            if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
-
-
-def create_model_summary(model: nn.Module) -> Dict[str, Any]:
-    """
-    Create comprehensive model summary.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        Model summary dictionary
-    """
-    param_info = count_parameters(model)
-    size_mb = get_model_size_mb(model)
-    
-    # Layer breakdown
-    layer_info = []
-    for name, module in model.named_modules():
-        if len(list(module.children())) == 0:  # Leaf modules only
-            layer_params = sum(p.numel() for p in module.parameters())
-            layer_info.append({
-                'name': name,
-                'type': type(module).__name__,
-                'parameters': layer_params
-            })
-    
-    return {
-        'total_parameters': param_info['total_parameters'],
-        'trainable_parameters': param_info['trainable_parameters'],
-        'model_size_mb': size_mb,
-        'num_layers': len(layer_info),
-        'layer_breakdown': layer_info
-    }
-
-
-class InferenceOptimizer:
-    """
-    Utilities for optimizing model inference.
-    """
-    
-    @staticmethod
-    def convert_to_half_precision(model: nn.Module) -> nn.Module:
-        """Convert model to half precision (FP16)."""
-        return model.half()
-    
-    @staticmethod
-    def enable_torch_compile(model: nn.Module) -> nn.Module:
-        """Enable PyTorch 2.0 compilation if available."""
+    def __init__(self):
+        # Import device utilities
         try:
-            import torch._dynamo
-            return torch.compile(model)
+            from ra.device_utils import device, get_device
+            self.device = device
+            self.get_device = get_device
         except ImportError:
-            print("torch.compile not available, skipping compilation")
-            return model
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.get_device = lambda: self.device
+        
+        # Add models to path for imports
+        self.models_path = Path(__file__).parent.parent / "models"
+        if str(self.models_path) not in sys.path:
+            sys.path.insert(0, str(self.models_path))
+        
+        # Define model configurations
+        self.model_configs = {
+            'bert_sentiment': {
+                'module': 'models.bert_sentiment',
+                'classes': ['BERTSentimentClassifier'],
+                'factory_functions': ['create_bert_sentiment_model'],
+                'checkpoint_patterns': [
+                    'models/bert_sentiment/',
+                    'checkpoints/bert_sentiment/',
+                    'saved_models/bert_sentiment/'
+                ]
+            },
+            'resnet_cifar': {
+                'module': 'models.resnet_cifar', 
+                'classes': ['ResNetCIFAR'],
+                'factory_functions': ['resnet56_cifar', 'resnet20_cifar', 'resnet32_cifar'],
+                'checkpoint_patterns': [
+                    'models/resnet_cifar/',
+                    'checkpoints/resnet_cifar/',
+                    'saved_models/resnet_cifar/'
+                ]
+            },
+            'custom_models': {
+                'module': 'models.custom_model_example',
+                'classes': ['CustomTextClassifier', 'CustomVisionClassifier'],
+                'factory_functions': [],
+                'checkpoint_patterns': [
+                    'models/custom/',
+                    'checkpoints/custom/',
+                    'saved_models/custom/'
+                ]
+            }
+        }
+        
+        # Cache for model status to avoid repeated checks
+        self._status_cache: Dict[str, ModelStatus] = {}
+        self._cache_valid = False
     
-    @staticmethod
-    def optimize_for_inference(
-        model: nn.Module,
-        use_half_precision: bool = False,
-        use_compile: bool = False
-    ) -> nn.Module:
-        """Apply various inference optimizations."""
-        model.eval()
+    def _clear_cache(self):
+        """Clear the model status cache."""
+        self._status_cache.clear()
+        self._cache_valid = False
+    
+    def _find_checkpoints(self, patterns: List[str]) -> List[str]:
+        """Find available checkpoint files matching the given patterns."""
+        checkpoints = []
         
-        if use_half_precision:
-            model = InferenceOptimizer.convert_to_half_precision(model)
+        for pattern_dir in patterns:
+            pattern_path = Path(pattern_dir)
+            if pattern_path.exists() and pattern_path.is_dir():
+                # Look for common checkpoint file extensions
+                checkpoint_extensions = ['*.pth', '*.pt', '*.bin', '*.ckpt']
+                for ext in checkpoint_extensions:
+                    checkpoints.extend([str(p) for p in pattern_path.glob(ext)])
         
-        if use_compile:
-            model = InferenceOptimizer.enable_torch_compile(model)
+        return checkpoints
+    
+    def _test_model_instantiation(self, module_name: str, class_names: List[str]) -> Tuple[bool, Optional[str]]:
+        """Test if model classes can be imported and instantiated."""
+        try:
+            module = __import__(module_name, fromlist=class_names)
+            
+            for class_name in class_names:
+                if hasattr(module, class_name):
+                    model_class = getattr(module, class_name)
+                    
+                    # Try to instantiate with minimal parameters
+                    if class_name == 'BERTSentimentClassifier':
+                        test_instance = model_class(
+                            model_name="bert-base-uncased",
+                            num_classes=2
+                        )
+                    elif class_name == 'ResNetCIFAR':
+                        # ResNet needs to be instantiated via factory functions
+                        continue
+                    else:
+                        test_instance = model_class(num_classes=2)
+                    
+                    # Test device compatibility
+                    try:
+                        test_instance = test_instance.to(self.device)
+                        del test_instance  # Clean up
+                        return True, None
+                    except Exception as e:
+                        return False, f"Device compatibility issue: {str(e)}"
+            
+            # Test factory functions for ResNet
+            if 'resnet' in module_name.lower():
+                for func_name in ['resnet56_cifar', 'resnet20_cifar']:
+                    if hasattr(module, func_name):
+                        factory_func = getattr(module, func_name)
+                        test_instance = factory_func(num_classes=10)
+                        test_instance = test_instance.to(self.device)
+                        del test_instance
+                        return True, None
+            
+            return True, None
+            
+        except ImportError as e:
+            return False, f"Import error: {str(e)}"
+        except Exception as e:
+            return False, f"Instantiation error: {str(e)}"
+    
+    def check_model_status(self, model_name: str, force_refresh: bool = False) -> ModelStatus:
+        """
+        Check comprehensive status of a specific model.
         
-        return model
+        Args:
+            model_name: Name of the model to check ('bert_sentiment', 'resnet_cifar', etc.)
+            force_refresh: Whether to bypass cache and perform fresh check
+            
+        Returns:
+            ModelStatus object with comprehensive status information
+        """
+        
+        if not force_refresh and model_name in self._status_cache:
+            return self._status_cache[model_name]
+        
+        if model_name not in self.model_configs:
+            return ModelStatus(
+                name=model_name,
+                available=False,
+                can_instantiate=False,
+                has_checkpoints=False,
+                checkpoint_paths=[],
+                class_importable=False,
+                error_message=f"Unknown model: {model_name}"
+            )
+        
+        config = self.model_configs[model_name]
+        
+        # Check if classes can be imported and instantiated
+        can_instantiate, error_msg = self._test_model_instantiation(
+            config['module'], 
+            config['classes']
+        )
+        
+        # Find available checkpoints
+        checkpoint_paths = self._find_checkpoints(config['checkpoint_patterns'])
+        
+        # Determine overall availability
+        available = can_instantiate  # Model is available if it can be instantiated
+        
+        status = ModelStatus(
+            name=model_name,
+            available=available,
+            can_instantiate=can_instantiate,
+            has_checkpoints=len(checkpoint_paths) > 0,
+            checkpoint_paths=checkpoint_paths,
+            class_importable=can_instantiate,  # If can instantiate, classes are importable
+            error_message=error_msg if not can_instantiate else None,
+            device_compatible=True  # Tested during instantiation
+        )
+        
+        # Cache the result
+        self._status_cache[model_name] = status
+        return status
+    
+    def check_all_models(self, force_refresh: bool = False) -> Dict[str, ModelStatus]:
+        """Check status of all configured models."""
+        if force_refresh:
+            self._clear_cache()
+        
+        all_status = {}
+        for model_name in self.model_configs.keys():
+            all_status[model_name] = self.check_model_status(model_name, force_refresh)
+        
+        return all_status
+    
+    def get_available_models(self) -> List[str]:
+        """Get list of available model names."""
+        all_status = self.check_all_models()
+        return [name for name, status in all_status.items() if status.available]
+    
+    def get_models_with_checkpoints(self) -> List[str]:
+        """Get list of models that have saved checkpoints."""
+        all_status = self.check_all_models()
+        return [name for name, status in all_status.items() if status.has_checkpoints]
 
 
-if __name__ == "__main__":
-    # Example usage
+# Global instance for consistent checking across the codebase
+_model_checker = UnifiedModelChecker()
+
+
+def unified_model_check(model_name: str, force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Unified model checking function for use across the codebase.
     
-    # Test checkpoint manager
-    print("Testing checkpoint manager...")
-    checkpoint_manager = ModelCheckpointManager("./test_checkpoints")
+    Args:
+        model_name: Name of the model to check
+        force_refresh: Whether to bypass cache
+        
+    Returns:
+        Dictionary with model status information
+    """
+    status = _model_checker.check_model_status(model_name, force_refresh)
     
-    # Create dummy model
-    model = nn.Sequential(
-        nn.Linear(10, 5),
-        nn.ReLU(),
-        nn.Linear(5, 2)
-    )
+    return {
+        'available': status.available,
+        'can_instantiate': status.can_instantiate,
+        'has_checkpoints': status.has_checkpoints,
+        'checkpoint_paths': status.checkpoint_paths,
+        'error': status.error_message,
+        'device_compatible': status.device_compatible
+    }
+
+
+def check_model_availability_fixed() -> Dict[str, bool]:
+    """
+    Fixed model availability checker that provides consistent results.
+    Replacement for the original check_model_availability function.
+    """
+    all_status = _model_checker.check_all_models()
+    return {name: status.available for name, status in all_status.items()}
+
+
+def print_model_status_report(verbose: bool = False):
+    """
+    Print a comprehensive, unified model status report.
+    This eliminates contradictory availability messages.
     
-    # Test saving
-    save_path = checkpoint_manager.save_checkpoint(
-        model=model,
-        epoch=1,
-        metrics={'accuracy': 0.85, 'loss': 0.3},
-        model_name="test_model",
-        is_best=True
-    )
-    print(f"Checkpoint saved to: {save_path}")
+    Args:
+        verbose: Whether to include detailed information
+    """
+    print("🔍 Unified Model Status Report")
+    print("=" * 50)
     
-    # Test loading
-    loaded_info = checkpoint_manager.load_checkpoint(save_path, model)
-    print(f"Loaded checkpoint from epoch: {loaded_info['epoch']}")
-    print(f"Loaded metrics: {loaded_info['metrics']}")
+    device_info = _model_checker.get_device()
+    print(f"🔧 Device: {device_info}")
     
-    # Test model wrapper
-    print("\nTesting model wrapper...")
-    wrapper = ModelWrapper(model)
+    if torch.cuda.is_available():
+        print(f"🔧 GPU: {torch.cuda.get_device_name(0)}")
     
-    # Test prediction
-    test_input = torch.randn(5, 10)
-    predictions = wrapper.predict(test_input)
-    print(f"Prediction shape: {predictions.shape}")
+    print("=" * 50)
     
-    # Test single prediction
-    single_pred = wrapper.predict_single(test_input[0])
-    print(f"Single prediction: class={single_pred['predicted_class']}, confidence={single_pred['confidence']:.3f}")
+    all_status = _model_checker.check_all_models()
     
-    # Test model info
-    model_info = wrapper.get_model_info()
-    print(f"Model info: {model_info}")
+    for model_name, status in all_status.items():
+        if status.available:
+            print(f"✅ {model_name}: Available")
+            if verbose:
+                print(f"   - Can instantiate: {status.can_instantiate}")
+                print(f"   - Has checkpoints: {status.has_checkpoints}")
+                if status.checkpoint_paths:
+                    print(f"   - Checkpoint paths: {len(status.checkpoint_paths)} found")
+        else:
+            print(f"❌ {model_name}: Not available")
+            if verbose and status.error_message:
+                print(f"   - Error: {status.error_message}")
     
-    # Test model summary
-    print("\nTesting model summary...")
-    summary = create_model_summary(model)
-    print(f"Model summary: {summary}")
+    print("=" * 50)
     
-    print("\nAll tests passed!")
+    available_models = [name for name, status in all_status.items() if status.available]
+    print(f"📊 Summary: {len(available_models)}/{len(all_status)} models available")
+    
+    if available_models:
+        print(f"🎯 Ready for training: {', '.join(available_models)}")
+
+
+def validate_model_for_training(model_name: str) -> bool:
+    """
+    Validate that a model is ready for training.
+    
+    Args:
+        model_name: Name of the model to validate
+        
+    Returns:
+        True if model is ready for training, False otherwise
+        
+    Raises:
+        RuntimeError: If model is not available with detailed error message
+    """
+    status = _model_checker.check_model_status(model_name)
+    
+    if not status.available:
+        error_msg = f"Model '{model_name}' is not available for training."
+        if status.error_message:
+            error_msg += f" Error: {status.error_message}"
+        raise RuntimeError(error_msg)
+    
+    return True
+
+
+def get_model_checkpoint_path(model_name: str) -> Optional[str]:
+    """
+    Get the best available checkpoint path for a model.
+    
+    Args:
+        model_name: Name of the model
+        
+    Returns:
+        Path to the best checkpoint, or None if no checkpoints available
+    """
+    status = _model_checker.check_model_status(model_name)
+    
+    if not status.checkpoint_paths:
+        return None
+    
+    # Return the first available checkpoint
+    # In a more sophisticated implementation, you could sort by modification date
+    return status.checkpoint_paths[0]
+
+
+def list_available_models() -> List[str]:
+    """Get list of available model names."""
+    return _model_checker.get_available_models()
+
+
+def list_models_with_checkpoints() -> List[str]:
+    """Get list of models that have saved checkpoints."""
+    return _model_checker.get_models_with_checkpoints()
+
+
+# Initialize and print status when module is imported
+print_model_status_report(verbose=False)

@@ -28,36 +28,11 @@ from models import get_bert_model, get_resnet56_model
 
 
 def check_model_availability():
-    """Check which of your models are available."""
-    available = {
-        'bert_sentiment': False,
-        'resnet_cifar': False,
-        'custom_models': False
-    }
-    
-    try:
-        _ = get_bert_model("bert-base-uncased", num_classes=2)
-        available['bert_sentiment'] = True
-        print("✅ Your BERT sentiment model available")
-    except Exception as e:
-        print(f"❌ BERT sentiment model unavailable: {e}")
-    
-    try:
-        _ = get_resnet56_model(num_classes=10)
-        available['resnet_cifar'] = True
-        print("✅ Your ResNet CIFAR model available")
-    except Exception as e:
-        print(f"❌ ResNet CIFAR model unavailable: {e}")
-    
-    try:
-        from models.custom_model_example import CustomTextClassifier
-        _ = CustomTextClassifier(num_classes=2)
-        available['custom_models'] = True
-        print("✅ Your custom model examples available")
-    except Exception as e:
-        print(f"❌ Your custom model examples unavailable: {e}")
-    
-    return available
+    """Use unified model checking system."""
+    from ra.model_utils import print_model_status_report
+    print_model_status_report(verbose=False)
+    return True  # Status printed by unified system
+
 
 
 def load_config(config_path: str) -> dict:
@@ -244,10 +219,10 @@ def main():
         return
 
     print("\n🔍 Checking model availability…")
+    print("\n🔍 Model Availability Check:")
     avail = check_model_availability()
-    if not any(avail.values()):
-        print("❌ No models found. Aborting.")
-        return
+    # Availability status printed by unified system
+
 
     cfg = load_config(args.config)
     print(f"\n📋 Loaded config: {args.config}")
