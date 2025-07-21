@@ -12,6 +12,7 @@ from ra.device_utils import device, get_device
 from pathlib import Path
 import json
 import sys
+from ra.model_utils import list_available_models, validate_model_for_training
 
 # Ensure project root is on PYTHONPATH
 ROOT = Path(__file__).parent.parent.resolve()
@@ -28,10 +29,13 @@ from models import get_bert_model, get_resnet56_model
 
 
 def check_model_availability():
-    """Use unified model checking system."""
-    from ra.model_utils import print_model_status_report
-    print_model_status_report(verbose=False)
-    return True  # Status printed by unified system
+    """Use unified model checking system with controlled initialization."""
+    from ra.model_utils import ensure_initialized
+    
+    # This will print status only once, no matter how many times called
+    ensure_initialized()
+    return True
+
 
 
 
@@ -201,6 +205,7 @@ def evaluation_stage(config: dict):
 
 
 def main():
+    """Main execution with controlled status reporting and unified model checking."""
     parser = argparse.ArgumentParser(
         description="Train & evaluate your Reverse Attribution models"
     )
@@ -214,36 +219,52 @@ def main():
     print(f"🔧 Device: {get_device()}")
     print("=" * 80)
 
+    # Import unified model checking functions
+    from ra.model_utils import report_status_once, get_model_status_cached
+
+    # Handle model checking mode
     if args.check_models:
-        check_model_availability()
+        report_status_once(verbose=True)  # Detailed report for check mode
         return
 
-    print("\n🔍 Checking model availability…")
-    print("\n🔍 Model Availability Check:")
-    avail = check_model_availability()
-    # Availability status printed by unified system
+    # Single model availability check for normal execution
+    print("\n🔍 Checking model availability...")
+    report_status_once(verbose=False)  # This prints once and caches results
+    
+    # Get cached availability status for later use
+    model_status = get_model_status_cached()
+    available_models = {name: status.available for name, status in model_status.items()}
 
-
+    # Load configuration
     cfg = load_config(args.config)
     print(f"\n📋 Loaded config: {args.config}")
 
+    # Execute pipeline stages
     results = {}
+    
     if args.stage in ('data','all'):
         try:
-            setup_data_stage(cfg); results['data'] = 'done'
+            setup_data_stage(cfg)
+            results['data'] = 'done'
         except Exception as e:
-            print(f"❌ Data stage error: {e}"); results['data'] = f'error: {e}'
+            print(f"❌ Data stage error: {e}")
+            results['data'] = f'error: {e}'
+    
     if args.stage in ('train','all'):
         try:
             results['train'] = training_stage(cfg, args.model_type)
         except Exception as e:
-            print(f"❌ Training stage error: {e}"); results['train'] = f'error: {e}'
+            print(f"❌ Training stage error: {e}")
+            results['train'] = f'error: {e}'
+    
     if args.stage in ('eval','all'):
         try:
             results['eval'] = evaluation_stage(cfg)
         except Exception as e:
-            print(f"❌ Eval stage error: {e}"); results['eval'] = f'error: {e}'
+            print(f"❌ Eval stage error: {e}")
+            results['eval'] = f'error: {e}'
 
+    # Pipeline summary
     print("\n" + "="*80)
     print("🎉 Pipeline Summary")
     for k, v in results.items():
@@ -251,9 +272,10 @@ def main():
         print(f"{status} {k.capitalize()}: {v}")
     print("="*80)
 
+    # Model usage summary (using cached status)
     print("\n🏷️ Models used:")
-    for name, ok in avail.items():
-        print(f"  {'✅' if ok else '❌'} {name}")
+    for name, available in available_models.items():
+        print(f"  {'✅' if available else '❌'} {name}")
     print("="*80)
 
 

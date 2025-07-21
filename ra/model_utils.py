@@ -43,6 +43,36 @@ class ModelStatus:
     class_importable: bool
     error_message: Optional[str] = None
     device_compatible: bool = True
+    
+class _ModelStatusManager:
+    """Singleton manager for model status reporting."""
+    
+    def __init__(self):
+        self._reported = False
+        self._status_cache = None
+    
+    def report_once(self, verbose=False):
+        """Report model status exactly once per session."""
+        if not self._reported:
+            print_model_status_report(verbose=verbose)
+            self._reported = True
+    
+    def get_cached_status(self):
+        """Get cached model status without printing."""
+        if self._status_cache is None:
+            self._status_cache = _model_checker.check_all_models()
+        return self._status_cache
+
+# Global singleton instance
+_status_manager = _ModelStatusManager()
+
+def report_status_once(verbose=False):
+    """Public interface for controlled status reporting."""
+    _status_manager.report_once(verbose)
+
+def get_model_status_cached():
+    """Get model status without triggering reports."""
+    return _status_manager.get_cached_status()
 
 
 class UnifiedModelChecker:
@@ -378,6 +408,18 @@ def list_models_with_checkpoints() -> List[str]:
     """Get list of models that have saved checkpoints."""
     return _model_checker.get_models_with_checkpoints()
 
+# Add at the end of ra/model_utils.py instead:
+_initialized = False
 
-# Initialize and print status when module is imported
-print_model_status_report(verbose=False)
+def ensure_initialized():
+    """Ensure model checking system is initialized exactly once."""
+    global _initialized
+    if not _initialized:
+        print_model_status_report(verbose=False)
+        _initialized = True
+
+# Optional: Add this for debugging
+def reset_initialization():
+    """Reset initialization state for testing purposes."""
+    global _initialized
+    _initialized = False

@@ -58,7 +58,19 @@ class ModelFactory:
     """
     Factory class that creates instances of your actual model implementations.
     """
+    @staticmethod  
+    def _ensure_status_reported():
+        """Ensure status is reported exactly once."""
+        from ra.model_utils import ensure_initialized
+        ensure_initialized()
     
+    @staticmethod
+    def create_text_model(model_type: str = "bert_sentiment", **kwargs):
+        """Create text model with controlled status reporting."""
+        ModelFactory._ensure_status_reported()  # Called once per session
+        
+        # Rest of your existing code...
+        validate_model_for_training(model_type)
     @staticmethod
     def create_text_model(
         model_name: str = "bert-base-uncased",
