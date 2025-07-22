@@ -1,0 +1,3 @@
+Model Implementation,Status,Datasets,Architecture,Parameters,Integration
+BERTSentimentClassifier,Finished : Available,"IMDB, Yelp",BERT-based Transformer,110M (base),Full RA Support
+ResNetCIFAR,Finished : Available,CIFAR-10,ResNet-56,~850K,Full RA Support

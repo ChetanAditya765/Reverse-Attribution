@@ -1,26 +1,26 @@
 [
   {
     "epoch": 1,
-    "train_loss": 0.12472710581559555,
-    "train_accuracy": 0.9592321428571429,
-    "val_loss": 0.09131203305676673,
-    "val_accuracy": 0.9771052631578947,
-    "learning_rate": 1e-05
+    "train_loss": 0.09113959285678741,
+    "train_accuracy": 0.9673821428571429,
+    "val_loss": 0.07421240932611915,
+    "val_accuracy": 0.9762368421052632,
+    "learning_rate": 2e-05
   },
   {
     "epoch": 2,
-    "train_loss": 0.0770355161424959,
-    "train_accuracy": 0.9788392857142857,
-    "val_loss": 0.08581882890337343,
-    "val_accuracy": 0.98,
-    "learning_rate": 1e-05
+    "train_loss": 0.06280325605043742,
+    "train_accuracy": 0.978625,
+    "val_loss": 0.07816181274919586,
+    "val_accuracy": 0.9739736842105263,
+    "learning_rate": 2e-05
   },
   {
     "epoch": 3,
-    "train_loss": 0.052095505980313254,
-    "train_accuracy": 0.9869821428571428,
-    "val_loss": 0.11321900559512472,
-    "val_accuracy": 0.9797368421052631,
-    "learning_rate": 1e-05
+    "train_loss": 0.04833655589095849,
+    "train_accuracy": 0.9845732142857143,
+    "val_loss": 0.09509654946773005,
+    "val_accuracy": 0.9754473684210526,
+    "learning_rate": 2e-05
   }
 ]

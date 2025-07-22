@@ -1,0 +1,46 @@
+checkpoints_dir: ./checkpoints
+data_dir: ./data
+datasets:
+  cifar10:
+    architecture: resnet56
+    batch_size: 128
+    epochs: 200
+    learning_rate: 0.1
+    model_class: ResNetCIFAR
+    num_classes: 10
+    weight_decay: 0.0001
+  imdb:
+    batch_size: 16
+    epochs: 3
+    learning_rate: 2.0e-05
+    model_class: BERTSentimentClassifier
+    model_name: bert-base-uncased
+    num_classes: 2
+  yelp:
+    batch_size: 8
+    epochs: 3
+    learning_rate: 1.0e-05
+    model_class: BERTSentimentClassifier
+    model_name: roberta-base
+    num_classes: 2
+device: cuda
+evaluation:
+  baseline_methods:
+  - shap
+  - lime
+  - integrated_gradients
+  localization_samples: 100
+  ra_samples: 500
+  user_study_samples: 50
+figures:
+  dpi: 300
+  formats:
+  - png
+  - pdf
+  generate_all: true
+model_implementations:
+  integration_status: actual_models
+  text_model_class: BERTSentimentClassifier
+  vision_model_class: ResNetCIFAR
+results_dir: ./reproduction_results
+seed: 42

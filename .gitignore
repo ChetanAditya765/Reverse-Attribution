@@ -25,7 +25,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
-
+*.checkpoints
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -36,7 +36,11 @@ pip-delete-this-directory.txt
 environment.yml
 .envrc
 venv.bak/
+# Ignore model checkpoints
+checkpoints/
 
+# Ignore data folders
+data/
 # PyInstaller
 *.manifest
 *.spec

@@ -1,0 +1,16 @@
+{
+  "cifar10_results": {
+    "accuracy": 0.9328,
+    "ece": 0.04508118439614774,
+    "brier_score": 0.011184436681310408,
+    "avg_a_flip": 819.4154770205516,
+    "std_a_flip": 300.337507497471,
+    "avg_counter_evidence_count": 5.0,
+    "avg_counter_evidence_strength": 0.0,
+    "samples_analyzed": 200,
+    "error_samples": 0,
+    "pct_samples_with_counter_evidence": 0.0,
+    "model_type": "ResNetCIFAR",
+    "model_class": "unknown"
+  }
+}
