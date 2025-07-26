@@ -1,0 +1,77 @@
+{
+  "imdb": {
+    "standard_metrics": {
+      "accuracy": 0.9210808529957324,
+      "precision": 0.9024065412750069,
+      "recall": 0.9064275351293438,
+      "f1": 0.9062596844468498,
+      "ece": 0.0260760288283199,
+      "brier_score": 0.010084676393956106,
+      "model_type": "BERT-base-uncased",
+      "architecture": "BERT",
+      "total_parameters": 110000000,
+      "num_samples": 10000,
+      "is_mock": true
+    },
+    "ra_analysis": {
+      "summary": {
+        "avg_a_flip": 657.7287466783022,
+        "std_a_flip": 14.825814377100341,
+        "avg_counter_evidence_count": 0.0,
+        "avg_counter_evidence_strength": -0.17271819327792906,
+        "samples_analyzed": 200
+      },
+      "detailed_results": []
+    }
+  },
+  "yelp": {
+    "standard_metrics": {
+      "accuracy": 0.8727492377674579,
+      "precision": 0.8581690113011713,
+      "recall": 0.8618448230906415,
+      "f1": 0.8618794692817858,
+      "ece": 0.035828322644332736,
+      "brier_score": 0.0361723665987686,
+      "model_type": "RoBERTa-base",
+      "architecture": "RoBERTa",
+      "total_parameters": 125000000,
+      "num_samples": 10000,
+      "is_mock": true
+    },
+    "ra_analysis": {
+      "summary": {
+        "avg_a_flip": 16.45319170588904,
+        "std_a_flip": 16.837752854118598,
+        "avg_counter_evidence_count": 4.0,
+        "avg_counter_evidence_strength": -0.13681819267481057,
+        "samples_analyzed": 200
+      },
+      "detailed_results": []
+    }
+  },
+  "cifar": {
+    "standard_metrics": {
+      "accuracy": 0.9183778603953726,
+      "precision": 0.9031345018456121,
+      "recall": 0.9291977997080759,
+      "f1": 0.9116311149319081,
+      "ece": 0.044453019944696526,
+      "brier_score": 0.029006967595337274,
+      "model_type": "ResNet-56",
+      "architecture": "ResNet",
+      "total_parameters": 855770,
+      "num_samples": 10000,
+      "is_mock": true
+    },
+    "ra_analysis": {
+      "summary": {
+        "avg_a_flip": 92.83708298695771,
+        "std_a_flip": 123.32921513442247,
+        "avg_counter_evidence_count": 4.0,
+        "avg_counter_evidence_strength": -0.20366296144739868,
+        "samples_analyzed": 200
+      },
+      "detailed_results": []
+    }
+  }
+}

@@ -1,2 +1,4 @@
 Dataset,Model Class,Accuracy,ECE,Brier Score,Avg A-Flip,CE Count
-CIFAR10,unknown,0.933,0.045,0.011,819.415,5.0
+IMDB,unknown,0.936,0.048,0.055,137.722,5.0
+YELP,unknown,0.980,0.010,0.016,26.067,5.0
+CIFAR10,unknown,0.933,0.045,0.011,819.411,5.0

@@ -1,6 +1,6 @@
 # Comprehensive Reverse Attribution Analysis Report
 
-Generated on: 2025-07-22 20:33:41
+Generated on: 2025-07-25 22:10:42
 
 ## Executive Summary
 
@@ -23,13 +23,13 @@ This report presents a comprehensive analysis of 3 trained models using the Reve
 ### CIFAR-10 ResNet
 - **Architecture**: ResNet-56
 - **Domain**: Computer Vision
-- **Accuracy**: 0.395
+- **Accuracy**: 0.933
 - **F1-Score**: 0.000
 
 ## Key Findings
 
 - **Best Performance**: Yelp RoBERTa (0.980 accuracy)
-- **Most Stable Attributions**: CIFAR-10 ResNet (A-Flip: 7.1)
+- **Most Stable Attributions**: Yelp RoBERTa (A-Flip: 26.1)
 - **Total Models Analyzed**: 3
 - **Models with RA Data**: 3
 
