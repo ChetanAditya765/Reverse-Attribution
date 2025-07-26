@@ -219,29 +219,50 @@ class ReverseAttribution:
     def _mask_feature(self, x: torch.Tensor, feature_idx: int) -> torch.Tensor:
         """Create masked input for counterfactual analysis."""
         x_masked = x.clone()
-        baseline = self._get_baseline(x)
         
-        if baseline is not None:
-            x_masked_flat = x_masked.flatten()
-            baseline_flat = baseline.flatten()
-            if feature_idx < len(x_masked_flat):
-                x_masked_flat[feature_idx] = baseline_flat[feature_idx]
-            x_masked = x_masked_flat.reshape(x.shape)
+        if self.model_type in ["bert_sentiment", "custom_text"]:
+            if hasattr(self.model, 'tokenizer'):
+                mask_token_id = self.model.tokenizer.mask_token_id
+                x_masked_flat = x_masked.view(-1)
+                if feature_idx < x_masked_flat.size(0):
+                    x_masked_flat[feature_idx] = mask_token_id
+                x_masked = x_masked_flat.view(x.shape)
+            else:
+                baseline = self._get_baseline(x)
+                if baseline is not None:
+                    x_masked_flat = x_masked.view(-1)
+                    baseline_flat = baseline.view(-1)
+                    if feature_idx < x_masked_flat.size(0):
+                        x_masked_flat[feature_idx] = baseline_flat[feature_idx]
+                    x_masked = x_masked_flat.view(x.shape)
         else:
-            x_masked_flat = x_masked.flatten()
-            if feature_idx < len(x_masked_flat):
-                x_masked_flat[feature_idx] = 0.0
-            x_masked = x_masked_flat.reshape(x.shape)
-            
+            baseline = self._get_baseline(x)
+            if baseline is not None:
+                x_masked_flat = x_masked.view(-1)
+                baseline_flat = baseline.view(-1)
+                if feature_idx < x_masked_flat.size(0):
+                    x_masked_flat[feature_idx] = baseline_flat[feature_idx]
+                x_masked = x_masked_flat.view(x.shape)
+            else:
+                x_masked_flat = x_masked.view(-1)
+                if feature_idx < x_masked_flat.size(0):
+                    x_masked_flat[feature_idx] = 0.0
+                x_masked = x_masked_flat.view(x.shape)
+        
         return x_masked
-    
+
     def _get_baseline(self, x: torch.Tensor) -> Optional[torch.Tensor]:
         """Get appropriate baseline for your model type."""
         if self.model_type in ["bert_sentiment", "custom_text"]:
-            # For text models, use zero baseline or pad token
-            return torch.zeros_like(x)
+            if hasattr(self.model, 'tokenizer'):
+                mask_token_id = self.model.tokenizer.mask_token_id
+                return torch.full_like(x, mask_token_id)
+            else:
+                return torch.zeros_like(x)
         elif self.model_type in ["resnet_cifar", "custom_vision"]:
-            # For vision models, use zero baseline
-            return torch.zeros_like(x)
+            # Use CIFAR-10 mean for vision models
+            mean_values = torch.tensor([0.4914, 0.4822, 0.4465]).view(1, 3, 1, 1)
+            return mean_values.expand_as(x).to(x.device)
         else:
             return torch.zeros_like(x)
+
