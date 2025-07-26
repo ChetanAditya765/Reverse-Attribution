@@ -309,11 +309,18 @@ def evaluate_vision_model(model_path: str, config: dict):
     if ra_results:
         a_flip_scores = [r['a_flip'] for r in ra_results]
         counter_evidence_counts = [len(r['counter_evidence']) for r in ra_results]
-        
+        counter_evidence_strengths = []
+        for r in ra_results:
+            if r['counter_evidence']:
+                avg_strength = np.mean([abs(ce[2]) for ce in r['counter_evidence']])
+                counter_evidence_strengths.append(avg_strength)
+            else:
+                counter_evidence_strengths.append(0.0)        
         ra_summary = {
             'avg_a_flip': np.mean(a_flip_scores),
             'std_a_flip': np.std(a_flip_scores),
             'avg_counter_evidence_count': np.mean(counter_evidence_counts),
+            'avg_counter_evidence_strength': np.mean(counter_evidence_strengths),  # ← new line        
             'samples_analyzed': len(ra_results),
             'model_types_detected': list(set([r.get('model_type', 'unknown') for r in ra_results]))
         }
