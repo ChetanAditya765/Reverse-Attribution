@@ -37,7 +37,6 @@ environment.yml
 .envrc
 venv.bak/
 # Ignore model checkpoints
-checkpoints/
 
 # Ignore data folders
 data/

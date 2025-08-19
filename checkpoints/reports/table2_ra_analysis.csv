@@ -1,0 +1,4 @@
+Dataset,Model Type,Avg A-Flip,Std A-Flip,Avg CE Count,Avg CE Strength,Samples with CE (%),Samples Analyzed
+IMDB,unknown,96.672,42.506,5.0,0.076,0.0,200
+YELP,unknown,42.099,14.109,5.0,0.084,0.0,200
+CIFAR10,unknown,901.292,362.733,5.0,0.037,0.0,200
