@@ -17,7 +17,12 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union
-
+try:
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+except Exception:
+    go = None
+    make_subplots = None
 # Set UTF-8 encoding for Windows compatibility
 os.environ['PYTHONUTF8'] = '1'
 
@@ -60,11 +65,43 @@ class ExplanationVisualizer:
     This class provides all the visualization functionality needed by the
     Reverse Attribution framework while maintaining backward compatibility.
     """
-    def __init__(self, save_dir: str | Path = "visuals", color_scheme: str = "RdYlBu"):
+    def __init__(self,
+                 save_dir: Union[str, Path] = "visuals",
+                 color_scheme: str = "RdYlBu",
+                 output_dir: Optional[Union[str, Path]] = None,
+                 **kwargs):
+        # primary save dir used by visualize_ra_explanation helpers
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.color_scheme = color_scheme
 
+        # optional “full report” structure used by your comprehensive methods
+        self.output_dir = Path(output_dir) if output_dir else Path("figs")
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        self.subdirs = {
+            "performance": self.output_dir / "performance",
+            "attribution": self.output_dir / "attribution",
+            "comparison": self.output_dir / "comparison",
+            "summary": self.output_dir / "summary",
+            "individual": self.output_dir / "individual_models",
+        }
+        for d in self.subdirs.values():
+            d.mkdir(exist_ok=True, parents=True)
+
+        self.data = {}
+        self.models = {}
+        self.formats = ["png", "pdf"]
+    def _to_numpy_tree(x):
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        if isinstance(x, np.ndarray):
+            return x
+        if isinstance(x, dict):
+            return {k: _to_numpy_tree(v) for k, v in x.items()}
+        if isinstance(x, (list, tuple)):
+            T = type(x)
+            return T(_to_numpy_tree(v) for v in x)
+        return x
     def visualize_ra_explanation(
         self,
         ra_result: Dict[str, Any],
@@ -200,9 +237,6 @@ class ExplanationVisualizer:
         out = (self.save_dir / "image_attrib.npy")
         np.save(out, phi)
         return {"overlay": str(out)}    
-    def __init__(self, output_dir: str = "figs", **kwargs):
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True, parents=True)
         
         # Create organized subdirectories
         self.subdirs = {

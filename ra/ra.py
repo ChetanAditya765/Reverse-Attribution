@@ -1,268 +1,226 @@
-"""
-Updated Reverse Attribution implementation that properly integrates with your models.
-"""
+# ra.py
+from __future__ import annotations
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import torch
-import torch.nn.functional as F
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Union
-from captum.attr import IntegratedGradients, LayerIntegratedGradients
-import sys
-from pathlib import Path
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from captum.attr import IntegratedGradients
 
-# Import your models for proper integration
-models_path = Path(__file__).parent.parent / "models"
-sys.path.insert(0, str(models_path))
+
+def _to_numpy_tree(x: Any) -> Any:
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    if isinstance(x, dict):
+        return {k: _to_numpy_tree(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        T = type(x)
+        return T(_to_numpy_tree(v) for v in x)
+    return x
+
+
+def _extract_logits(out: Any) -> torch.Tensor:
+    return out.logits if hasattr(out, "logits") else out
 
 
 class ReverseAttribution:
-    """
-    RA implementation that properly detects and works with your specific models.
-    """
-    
     def __init__(
         self,
-        model: torch.nn.Module,
+        model: nn.Module,
         baseline: Optional[Union[torch.Tensor, str]] = None,
-        device: str = None
+        device: Optional[str] = None,
     ):
-        """
-        Initialize RA explainer with proper model detection.
-        """
-        from ra.device_utils import device as auto_device
-        self.device = device or auto_device
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device).eval()
-
         self.baseline = baseline
-        self.model_type = self._detect_model_type()
-        
-        # Initialize attribution method based on your actual model type
-        self.attribution_method = self._setup_attribution_method()
-    
-    def _detect_model_type(self) -> str:
-        """
-        Detect which of your models is being used.
-        """
-        model_class_name = self.model.__class__.__name__
-        
-        # Check for your specific model implementations
-        if model_class_name == "BERTSentimentClassifier":
-            return "bert_sentiment"
-        elif model_class_name == "ResNetCIFAR":
-            return "resnet_cifar"
-        elif model_class_name == "CustomTextClassifier":
-            return "custom_text"
-        elif model_class_name == "CustomVisionClassifier":
-            return "custom_vision"
-        elif hasattr(self.model, 'embeddings') and hasattr(self.model.embeddings, 'word_embeddings'):
-            return "text_transformer"
-        elif any(isinstance(module, torch.nn.Conv2d) for module in self.model.modules()):
-            return "vision_cnn"
+
+    def _input_kind(self, x: torch.Tensor) -> str:
+        if x.dim() == 3 and torch.is_floating_point(x):
+            return "text_emb"  # (B, L, D)
+        if x.dim() == 4 and torch.is_floating_point(x):
+            return "image"     # (B, C, H, W)
+        if not torch.is_floating_point(x):
+            return "ids"
+        return "other"
+
+    def _forward_logits(self, x: torch.Tensor, add_args: Optional[tuple]) -> torch.Tensor:
+        if add_args:
+            out = self.model(x, *add_args)
         else:
-            return "unknown"
-    
-    def _setup_attribution_method(self):
-        """
-        Setup attribution method based on your specific model architecture.
-        """
-        if self.model_type in ["bert_sentiment", "custom_text", "text_transformer"]:
-            # For your text models, use layer attribution on embeddings
-            if hasattr(self.model, 'embeddings') and hasattr(self.model.embeddings, 'word_embeddings'):
-                return LayerIntegratedGradients(self.model, self.model.embeddings.word_embeddings)
-            elif hasattr(self.model, 'bert') and hasattr(self.model.bert, 'embeddings'):
-                return LayerIntegratedGradients(self.model, self.model.bert.embeddings.word_embeddings)
-            else:
-                return IntegratedGradients(self.model)
-        
-        elif self.model_type in ["resnet_cifar", "custom_vision", "vision_cnn"]:
-            # For your vision models, use standard integrated gradients
-            return IntegratedGradients(self.model)
-        
+            out = self.model(x)
+        return _extract_logits(out)
+
+    def _ig_attribute(
+        self,
+        x: torch.Tensor,
+        target: int,
+        n_steps: int,
+        baselines: Optional[torch.Tensor],
+        add_args: Optional[tuple],
+    ) -> torch.Tensor:
+        ig = IntegratedGradients(self.model)
+        attr = ig.attribute(
+            x,
+            target=target,
+            n_steps=n_steps,
+            baselines=baselines,
+            additional_forward_args=add_args,
+        )
+        return attr
+
+    def _prepare_baseline(self, x: torch.Tensor, kind: str) -> torch.Tensor:
+        if isinstance(self.baseline, torch.Tensor):
+            b = self.baseline.to(x.device)
+            if b.shape != x.shape:
+                b = b.expand_as(x)
+            return b
+        if kind == "text_emb":
+            return torch.zeros_like(x)
+        if kind == "image":
+            return torch.zeros_like(x)
+        return torch.zeros_like(x)
+
+    def _mask_token(self, x: torch.Tensor, token_idx: int, baseline: torch.Tensor) -> torch.Tensor:
+        x_m = x.clone()
+        if x_m.dim() == 3:
+            x_m[:, token_idx, :] = baseline[:, token_idx, :]
         else:
-            # Fallback to standard IG
-            return IntegratedGradients(self.model)
-    
+            xf = x_m.view(x_m.size(0), -1)
+            bf = baseline.view(baseline.size(0), -1)
+            if token_idx < xf.size(1):
+                xf[:, token_idx] = bf[:, token_idx]
+            x_m = xf.view_as(x)
+        return x_m
+
+    def _mask_pixel(self, x: torch.Tensor, h: int, w: int, baseline: torch.Tensor) -> torch.Tensor:
+        x_m = x.clone()
+        if x_m.dim() == 4:
+            x_m[:, :, h, w] = baseline[:, :, h, w]
+        else:
+            xf = x_m.view(x_m.size(0), -1)
+            bf = baseline.view(baseline.size(0), -1)
+            idx = h
+            if idx < xf.size(1):
+                xf[:, idx] = bf[:, idx]
+            x_m = xf.view_as(x)
+        return x_m
+
     def explain(
         self,
         x: torch.Tensor,
         y_true: int,
         top_m: int = 5,
         n_steps: int = 50,
-        additional_forward_args: tuple = None
-    ) -> Dict:
-        """
-        Generate RA explanation that works with your specific models.
-        """
+        additional_forward_args: Optional[tuple] = None,
+    ) -> Dict[str, Any]:
         x = x.to(self.device)
-        
+        kind = self._input_kind(x)
         with torch.no_grad():
-            # Handle different forward pass signatures for your models
-            if self.model_type == "bert_sentiment":
-                # Your BERT model might need attention_mask
-                if additional_forward_args:
-                    logits = self.model(x, *additional_forward_args)
-                else:
-                    logits = self.model(x)
-            else:
-                # Standard forward pass for other models
-                logits = self.model(x)
-            
+            logits = self._forward_logits(x, additional_forward_args)
             probs = F.softmax(logits, dim=-1)
-            y_hat = logits.argmax(dim=-1).item()
-            
-            # Get runner-up class
-            top2_probs, top2_classes = torch.topk(probs, 2, dim=-1)
-            runner_up = top2_classes[0, 1].item()
-        
-        # Compute attributions using the appropriate method
-        phi = self._compute_attributions(x, target=y_hat, n_steps=n_steps, additional_forward_args=additional_forward_args)
-        
-        # Filter negative attributions (counter-evidence)
-        negative_mask = phi < 0
-        negative_indices = torch.nonzero(negative_mask, as_tuple=True)[0]
-        
-        if len(negative_indices) == 0:
+            y_hat = int(torch.argmax(logits, dim=-1).item())
+            _, top2 = torch.topk(probs, 2, dim=-1)
+            runner_up = int(top2[0, 1].item())
+
+        baselines = self._prepare_baseline(x, kind)
+        phi = self._ig_attribute(x, target=y_hat, n_steps=n_steps, baselines=baselines, add_args=additional_forward_args)
+
+        if kind == "text_emb" and phi.dim() == 3:
+            token_scores = phi.abs().sum(-1)[0]
+            neg_token_idx = torch.nonzero(token_scores > 0, as_tuple=False).view(-1)
+            # Use signed token sums to get negative tokens
+            signed = phi.sum(-1)[0]
+            neg_token_idx = torch.nonzero(signed < 0, as_tuple=False).view(-1)
+            idx_list = neg_token_idx.detach().cpu().tolist()
+        elif kind == "image" and phi.dim() in (3, 4):
+            if phi.dim() == 4:
+                per_pixel = phi.abs().sum(1)[0]
+                signed = phi.sum(1)[0]
+            else:
+                per_pixel = phi.abs()[0]
+                signed = phi[0]
+            neg_positions = torch.nonzero(signed < 0, as_tuple=False)
+            idx_list = [(int(h.item()), int(w.item())) for h, w in neg_positions]
+        else:
+            flat = phi.view(-1)
+            idx_list = torch.nonzero(flat < 0, as_tuple=False).view(-1).detach().cpu().tolist()
+
+        if len(idx_list) == 0:
             return {
                 "counter_evidence": [],
                 "a_flip": 0.0,
-                "phi": phi.cpu().numpy(),
+                "phi": _to_numpy_tree(phi),
                 "y_hat": y_hat,
                 "runner_up": runner_up,
-                "model_type": self.model_type
             }
-        
-        # Counterfactual analysis
-        delta_values = []
-        original_prob = probs[0, y_true].item()
-        
-        for idx in negative_indices[:20]:  # Limit for efficiency
-            x_masked = self._mask_feature(x, idx.item())
-            
-            with torch.no_grad():
-                if self.model_type == "bert_sentiment" and additional_forward_args:
-                    masked_logits = self.model(x_masked, *additional_forward_args)
+
+        original_prob = float(probs[0, y_true].item())
+        deltas: List[float] = []
+        limit = min(len(idx_list), max(1, top_m * 4))
+
+        for k in range(limit):
+            idx = idx_list[k]
+            if kind == "text_emb":
+                x_masked = self._mask_token(x, idx, baselines)
+            elif kind == "image":
+                if isinstance(idx, tuple):
+                    h, w = idx
                 else:
-                    masked_logits = self.model(x_masked)
-                    
-                masked_probs = F.softmax(masked_logits, dim=-1)
-                masked_prob = masked_probs[0, y_true].item()
-            
-            delta = masked_prob - original_prob
-            delta_values.append(delta)
-        
-        # Build counter-evidence list
-        counter_evidence = []
-        for i, (idx, delta) in enumerate(zip(negative_indices, delta_values)):
-            counter_evidence.append((
-                idx.item(),
-                phi[idx].item(),
-                delta
-            ))
-        
-        # Sort by suppression strength
-        counter_evidence.sort(key=lambda x: abs(x[2]), reverse=True)
-        counter_evidence = counter_evidence[:top_m]
-        
-        # Compute A-Flip score
-        phi_runner = self._compute_attributions(x, target=runner_up, n_steps=n_steps, additional_forward_args=additional_forward_args)
-        a_flip = 0.5 * torch.sum(torch.abs(phi - phi_runner)).item()
-        
-        return {
-            "counter_evidence": counter_evidence,
-            "a_flip": a_flip,
-            "phi": phi.cpu().numpy(),
-            "y_hat": y_hat,
-            "runner_up": runner_up,
-            "model_type": self.model_type
-        }
-    
-    def _compute_attributions(
-        self, 
-        x: torch.Tensor, 
-        target: int, 
-        n_steps: int = 50,
-        additional_forward_args: tuple = None
-    ) -> torch.Tensor:
-        """Compute attributions with proper handling of your model types."""
-        
-        try:
-            attributions = self.attribution_method.attribute(
-                x,
-                target=target,
-                n_steps=n_steps,
-                baselines=self._get_baseline(x),
-                additional_forward_args=additional_forward_args
-            )
-            
-            # Handle different attribution shapes
-            if attributions.dim() > 2:
-                # For layer attributions or multi-dimensional outputs
-                attributions = attributions.squeeze()
-            
-            return attributions.flatten()
-            
-        except Exception as e:
-            print(f"Attribution computation failed: {e}")
-            # Fallback to gradient-based attribution
-            x.requires_grad_(True)
-            
-            if additional_forward_args:
-                logits = self.model(x, *additional_forward_args)
+                    h = int(idx)
+                    w = 0
+                x_masked = self._mask_pixel(x, h, w, baselines)
             else:
-                logits = self.model(x)
-                
-            loss = logits[0, target]
-            loss.backward()
-            
-            return x.grad.flatten()
-    
-    def _mask_feature(self, x: torch.Tensor, feature_idx: int) -> torch.Tensor:
-        """Create masked input for counterfactual analysis."""
-        x_masked = x.clone()
-        
-        if self.model_type in ["bert_sentiment", "custom_text"]:
-            if hasattr(self.model, 'tokenizer'):
-                mask_token_id = self.model.tokenizer.mask_token_id
-                x_masked_flat = x_masked.view(-1)
-                if feature_idx < x_masked_flat.size(0):
-                    x_masked_flat[feature_idx] = mask_token_id
-                x_masked = x_masked_flat.view(x.shape)
-            else:
-                baseline = self._get_baseline(x)
-                if baseline is not None:
-                    x_masked_flat = x_masked.view(-1)
-                    baseline_flat = baseline.view(-1)
-                    if feature_idx < x_masked_flat.size(0):
-                        x_masked_flat[feature_idx] = baseline_flat[feature_idx]
-                    x_masked = x_masked_flat.view(x.shape)
-        else:
-            baseline = self._get_baseline(x)
-            if baseline is not None:
-                x_masked_flat = x_masked.view(-1)
-                baseline_flat = baseline.view(-1)
-                if feature_idx < x_masked_flat.size(0):
-                    x_masked_flat[feature_idx] = baseline_flat[feature_idx]
-                x_masked = x_masked_flat.view(x.shape)
-            else:
-                x_masked_flat = x_masked.view(-1)
-                if feature_idx < x_masked_flat.size(0):
-                    x_masked_flat[feature_idx] = 0.0
-                x_masked = x_masked_flat.view(x.shape)
-        
-        return x_masked
+                xf = x.clone().view(1, -1)
+                bf = baselines.view(1, -1)
+                if isinstance(idx, tuple):
+                    flat_i = idx[0]
+                else:
+                    flat_i = int(idx)
+                if flat_i < xf.size(1):
+                    xf[0, flat_i] = bf[0, flat_i]
+                x_masked = xf.view_as(x)
 
-    def _get_baseline(self, x: torch.Tensor) -> Optional[torch.Tensor]:
-        """Get appropriate baseline for your model type."""
-        if self.model_type in ["bert_sentiment", "custom_text"]:
-            if hasattr(self.model, 'tokenizer'):
-                mask_token_id = self.model.tokenizer.mask_token_id
-                return torch.full_like(x, mask_token_id)
-            else:
-                return torch.zeros_like(x)
-        elif self.model_type in ["resnet_cifar", "custom_vision"]:
-            # Use CIFAR-10 mean for vision models
-            mean_values = torch.tensor([0.4914, 0.4822, 0.4465]).view(1, 3, 1, 1)
-            return mean_values.expand_as(x).to(x.device)
-        else:
-            return torch.zeros_like(x)
+            with torch.no_grad():
+                m_logits = self._forward_logits(x_masked, additional_forward_args)
+                m_probs = F.softmax(m_logits, dim=-1)
+                m_prob = float(m_probs[0, y_true].item())
+            deltas.append(m_prob - original_prob)
 
+        entries: List[Tuple] = []
+        if kind == "text_emb":
+            for idx, d in zip(idx_list[:limit], deltas):
+                contrib = float(phi[0, idx].sum().detach().cpu().item())
+                entries.append((int(idx), contrib, float(d)))
+        elif kind == "image":
+            if phi.dim() == 4:
+                per_pixel_signed = phi.sum(1)[0]
+            else:
+                per_pixel_signed = phi[0]
+            for pos, d in zip(idx_list[:limit], deltas):
+                h, w = (pos if isinstance(pos, tuple) else (int(pos), 0))
+                contrib = float(per_pixel_signed[h, w].detach().cpu().item())
+                entries.append(((h, w), contrib, float(d)))
+        else:
+            flat = phi.view(-1)
+            for idx, d in zip(idx_list[:limit], deltas):
+                contrib = float(flat[int(idx)].detach().cpu().item())
+                entries.append((int(idx), contrib, float(d)))
+
+        entries.sort(key=lambda t: abs(t[2]), reverse=True)
+        entries = entries[:top_m]
+
+        phi_runner = self._ig_attribute(
+            x, target=runner_up, n_steps=n_steps, baselines=baselines, add_args=additional_forward_args
+        )
+        a_flip = float(0.5 * torch.sum(torch.abs(phi - phi_runner)).detach().cpu().item())
+
+        return _to_numpy_tree(
+            {
+                "counter_evidence": entries,
+                "a_flip": a_flip,
+                "phi": phi,
+                "y_hat": y_hat,
+                "runner_up": runner_up,
+            }
+        )

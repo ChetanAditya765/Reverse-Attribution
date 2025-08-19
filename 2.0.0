@@ -1,0 +1,9 @@
+Collecting portalocker
+  Using cached portalocker-3.2.0-py3-none-any.whl.metadata (8.7 kB)
+Collecting pywin32>=226 (from portalocker)
+  Using cached pywin32-311-cp39-cp39-win_amd64.whl.metadata (10 kB)
+Using cached portalocker-3.2.0-py3-none-any.whl (22 kB)
+Using cached pywin32-311-cp39-cp39-win_amd64.whl (9.6 MB)
+Installing collected packages: pywin32, portalocker
+
+Successfully installed portalocker-3.2.0 pywin32-311
