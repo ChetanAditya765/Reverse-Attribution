@@ -8,7 +8,7 @@ Integrated with your actual model implementations:
 Provides SHAP, LIME, and Captum (Integrated Gradients) explanations
 that work seamlessly with your model architectures.
 """
-
+from __future__ import annotations
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -17,7 +17,6 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 import sys
-from __future__ import annotations
 log = logging.getLogger(__name__)
 
 # Import baseline explanation libraries
