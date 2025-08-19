@@ -60,7 +60,146 @@ class ExplanationVisualizer:
     This class provides all the visualization functionality needed by the
     Reverse Attribution framework while maintaining backward compatibility.
     """
-    
+    def __init__(self, save_dir: str | Path = "visuals", color_scheme: str = "RdYlBu"):
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.color_scheme = color_scheme
+
+    def visualize_ra_explanation(
+        self,
+        ra_result: Dict[str, Any],
+        input_data: Any,
+        input_type: str = "text",          # "text" | "image"
+        tokens: Optional[List[str]] = None,
+        show_details: bool = True,
+        interactive: bool = True
+    ) -> Any:
+        """
+        Unified entrypoint to visualize Reverse Attribution results.
+
+        Args:
+            ra_result: dict returned by ReverseAttribution.explain(...)
+                       expected keys: 'phi', 'counter_evidence', 'a_flip', and optionally 'model_type'
+            input_data: the original input (string for text, CHW or NCHW tensor/array for image)
+            input_type: "text" or "image"
+            tokens: optional pre-tokenized text
+            show_details: include auxiliary panels/metrics
+            interactive: Plotly (True) or Matplotlib (False)
+
+        Returns:
+            Plotly/Matplotlib figure OR a dict of artifact paths.
+        """
+        if input_type == "text":
+            return self._visualize_text(ra_result, input_data, tokens, show_details, interactive)
+        elif input_type == "image":
+            return self._visualize_image(ra_result, input_data, show_details, interactive)
+        else:
+            raise ValueError(f"Unsupported input_type: {input_type}")
+
+    # ----------------------------- TEXT ---------------------------------
+    def _visualize_text(
+        self,
+        ra_result: Dict[str, Any],
+        text: str,
+        tokens: Optional[List[str]],
+        show_details: bool,
+        interactive: bool
+    ) -> Any:
+        phi = np.array(ra_result.get("phi", []), dtype=float)
+        ce  = ra_result.get("counter_evidence", [])
+        a_flip = float(ra_result.get("a_flip", 0.0))
+
+        if tokens is None:
+            # fallback tokenization
+            tokens = text.split()
+
+        n = min(len(tokens), len(phi))
+        tokens = tokens[:n]
+        phi    = phi[:n]
+
+        title = f"Reverse Attribution (A-Flip: {a_flip:.3f})"
+
+        if interactive and go is not None:
+            fig = make_subplots(
+                rows=2 if show_details else 1, cols=1,
+                subplot_titles=("Token Attributions", "Counter-Evidence (top-k)") if show_details else ("Token Attributions",),
+                vertical_spacing=0.12
+            )
+            # bar for token attributions
+            fig.add_bar(x=list(range(n)), y=phi.tolist(), name="φ", row=1, col=1)
+            fig.update_xaxes(title_text="token index", row=1, col=1)
+            fig.update_yaxes(title_text="attribution (φ)", row=1, col=1)
+            if show_details and ce:
+                # ce entries can be tuples like (idx, attr, delta)
+                idxs = [int(t[0]) for t in ce[: min(len(ce), 20)] if len(t) >= 1]
+                deltas = [float(t[2]) if len(t) >= 3 else 0.0 for t in ce[: min(len(ce), 20)]]
+                fig.add_scatter(x=idxs, y=deltas, mode="markers", name="counter-evidence Δ", row=2, col=1)
+                fig.update_xaxes(title_text="token index", row=2, col=1)
+                fig.update_yaxes(title_text="Δ (flip pressure)", row=2, col=1)
+            fig.update_layout(title=title, showlegend=False)
+            return fig
+
+        # Matplotlib fallback
+        if plt is not None:
+            fig, ax = plt.subplots(figsize=(10, 3))
+            ax.bar(np.arange(n), phi, width=0.8)
+            ax.set_title(title)
+            ax.set_xlabel("token index")
+            ax.set_ylabel("attribution (φ)")
+            fig.tight_layout()
+            return fig
+
+        # If no plotting backend, just return a simple artifact dict
+        out = (self.save_dir / "text_attrib.npy")
+        np.save(out, phi)
+        return {"heatmap": str(out)}
+
+    # ----------------------------- IMAGE --------------------------------
+    def _visualize_image(
+        self,
+        ra_result: Dict[str, Any],
+        x: Any,
+        show_details: bool,
+        interactive: bool
+    ) -> Any:
+        phi = np.array(ra_result.get("phi", []), dtype=float)
+        a_flip = float(ra_result.get("a_flip", 0.0))
+        title = f"Reverse Attribution (A-Flip: {a_flip:.3f})"
+
+        # flatten handling (supports HxW or CxHxW)
+        if phi.ndim == 1 and hasattr(x, "shape"):
+            # try to infer H, W from input
+            if hasattr(x, "shape"):
+                if len(x.shape) == 4:  # (N,C,H,W) -> take first
+                    _, c, h, w = x.shape
+                elif len(x.shape) == 3:  # (C,H,W)
+                    c, h, w = x.shape
+                else:
+                    h = w = int(np.sqrt(len(phi)))
+                    c = 1
+            else:
+                h = w = int(np.sqrt(len(phi)))
+                c = 1
+            if h * w == len(phi):
+                phi = phi.reshape(h, w)
+
+        if interactive and go is not None and phi.ndim == 2:
+            fig = go.Figure()
+            fig.add_heatmap(z=phi, colorscale=self.color_scheme, zmid=0)
+            fig.update_layout(title=title, xaxis_title="x", yaxis_title="y")
+            return fig
+
+        if plt is not None and phi.ndim == 2:
+            fig, ax = plt.subplots(figsize=(4, 4))
+            im = ax.imshow(phi, cmap=self.color_scheme)
+            ax.set_title(title)
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            fig.tight_layout()
+            return fig
+
+        out = (self.save_dir / "image_attrib.npy")
+        np.save(out, phi)
+        return {"overlay": str(out)}    
     def __init__(self, output_dir: str = "figs", **kwargs):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
@@ -244,7 +383,7 @@ class ExplanationVisualizer:
         if 'standard_metrics' in data:
             standardized['performance_metrics'] = data['standard_metrics']
         
-        for metric in ['accuracy', 'precision', 'recall', 'f1', 'loss', 'ece', 'brier_score']:
+        for metric in ['accuracy', 'loss', 'ece', 'brier_score']:
             if metric in data:
                 standardized['performance_metrics'][metric] = data[metric]
         
@@ -283,7 +422,7 @@ class ExplanationVisualizer:
         
         # 1. Overall Performance Comparison
         ax1 = fig.add_subplot(gs[0, :2])
-        metrics = ['accuracy', 'precision', 'recall', 'f1']
+        metrics = ['accuracy']
         x = np.arange(len(metrics))
         width = 0.25
         
@@ -357,14 +496,12 @@ class ExplanationVisualizer:
                 config.get('name', model.upper()),
                 config.get('architecture', 'Unknown'),
                 f"{perf.get('accuracy', 0):.3f}",
-                f"{perf.get('f1', 0):.3f}",
                 f"{ra.get('avg_a_flip', 0):.1f}" if ra.get('avg_a_flip', 0) > 0 else "N/A",
-                f"{training.get('total_parameters', 0):,}" if training.get('total_parameters', 0) > 0 else "N/A"
             ])
         
         table = ax3.table(
             cellText=table_data,
-            colLabels=['Model', 'Architecture', 'Accuracy', 'F1-Score', 'A-Flip', 'Parameters'],
+            colLabels=['Model', 'Architecture', 'Accuracy', 'A-Flip'],
             cellLoc='center',
             loc='center',
             bbox=[0.1, 0.3, 0.8, 0.4]
@@ -457,7 +594,7 @@ class ExplanationVisualizer:
             
             # 1. Performance Metrics
             ax1 = axes[0, 0]
-            metrics = ['accuracy', 'precision', 'recall', 'f1']
+            metrics = ['accuracy']
             values = [perf.get(metric, 0) for metric in metrics]
             
             bars = ax1.bar(metrics, values, color=config.get('color', '#666666'), alpha=0.7)
@@ -534,9 +671,6 @@ Type: {config.get('type', 'Unknown').title()}
 
 Performance:
 • Accuracy: {perf.get('accuracy', 0):.3f}
-• F1-Score: {perf.get('f1', 0):.3f}
-• Precision: {perf.get('precision', 0):.3f}
-• Recall: {perf.get('recall', 0):.3f}
 
 Attribution Analysis:
 • A-Flip Score: {ra.get('avg_a_flip', 0):.1f}
@@ -721,7 +855,6 @@ Attribution Analysis:
                     f.write(f"- **Architecture**: {config.get('architecture', 'Unknown')}\n")
                     f.write(f"- **Domain**: {config.get('domain', 'Unknown')}\n")
                     f.write(f"- **Accuracy**: {perf.get('accuracy', 0):.3f}\n")
-                    f.write(f"- **F1-Score**: {perf.get('f1', 0):.3f}\n\n")
                 
                 # Performance insights
                 best_model = max(self.models.keys(), 

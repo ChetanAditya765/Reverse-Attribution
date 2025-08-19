@@ -17,6 +17,8 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 import sys
+from __future__ import annotations
+log = logging.getLogger(__name__)
 
 # Import baseline explanation libraries
 try:
@@ -568,201 +570,175 @@ class CaptumExplainer(BaselineExplainer):
 
 class ExplainerHub:
     """
-    Central hub for managing baseline explanation methods with your models.
+    Unifies Captum/SHAP/LIME explainers under one interface.
+
+    Usage:
+        hub = ExplainerHub(model, model_type="bert_sentiment", device="cpu")
+        out = hub.explain(input_data=..., target_class=..., additional_forward_args=...)
     """
-    
-    def __init__(self, model: torch.nn.Module, device: str = "cpu"):
+
+    def __init__(self, model: torch.nn.Module,
+                 model_type: Optional[str] = None,
+                 device: Optional[str] = None) -> None:
         self.model = model
-        self.device = device
-        self.model_type = self._detect_model_type()
-        
-        # Initialize explainers
-        self.explainers = {}
-        self._initialize_explainers()
-    
-    def _detect_model_type(self) -> str:
-        """Detect which of your models is being used."""
-        model_class_name = self.model.__class__.__name__
-        
-        if model_class_name == "BERTSentimentClassifier":
-            return "bert_sentiment"
-        elif model_class_name == "ResNetCIFAR":
-            return "resnet_cifar"
-        elif model_class_name == "CustomTextClassifier":
-            return "custom_text"
-        elif model_class_name == "CustomVisionClassifier":
-            return "custom_vision"
+        self.model_type = (model_type or "").lower()
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.explainers: Dict[str, Any] = {}
+        self._initialize_explainers()  # <-- was missing in your file
+
+    # ------------------------- INITIALIZATION -------------------------
+
+    def _initialize_explainers(self) -> None:
+        """Initialize available explainers, filling self.explainers."""
+        log.info("🔧 Initializing explainers for %s", self.model_type or "unknown")
+
+        # Try Captum first (most reliable for PyTorch)
+        try:
+            self.explainers["captum"] = self._setup_captum()
+            log.info("✅ Captum explainer initialized")
+        except Exception as e:
+            log.warning("⚠️ Captum init failed: %s", e)
+
+        # Try SHAP (optional; TF/Torch backends vary)
+        try:
+            shap_expl = self._setup_shap()
+            if shap_expl is not None:
+                self.explainers["shap"] = shap_expl
+        except Exception as e:
+            log.warning("⚠️ SHAP init failed: %s", e)
+
+        # Try LIME (optional; API varies)
+        try:
+            lime_expl = self._setup_lime()
+            if lime_expl is not None:
+                self.explainers["lime"] = lime_expl
+        except Exception as e:
+            log.warning("⚠️ LIME init failed: %s", e)
+
+        # Back-compat attributes some callers expect:
+        self.captum = self.explainers.get("captum")
+        self.shap   = self.explainers.get("shap")
+        self.lime   = self.explainers.get("lime")
+
+        if not self.explainers:
+            raise RuntimeError("No baseline explainer is available (captum/shap/lime).")
+
+    def _setup_captum(self):
+        # Example Captum setup using Integrated Gradients
+        from captum.attr import IntegratedGradients
+        self.model.eval().to(self.device)
+        return CaptumWrapper(self.model, self.model_type, IntegratedGradients)
+
+    def _setup_shap(self):
+        # Optional; keep minimal to avoid heavy TF deps
+        try:
+            import shap  # noqa: F401
+        except Exception as e:
+            log.warning("⚠️ Failed to import SHAP: %s", e)
+            return None
+        return SHAPWrapper(self.model, self.model_type, self.device)
+
+    def _setup_lime(self):
+        # LIME APIs vary; do NOT pass mode=...
+        try:
+            from lime.lime_text import LimeTextExplainer  # noqa: F401
+            from lime.lime_image import LimeImageExplainer  # noqa: F401
+        except Exception as e:
+            log.warning("⚠️ Failed to import LIME: %s", e)
+            return None
+        return LIMEWrapper(self.model, self.model_type, self.device)
+
+    # ------------------------- UNIFIED INTERFACE -------------------------
+
+    def explain(self,
+                input_data: Any = None,
+                target_class: Optional[int] = None,
+                additional_forward_args: Any = None,
+                **kwargs) -> Dict[str, Any]:
+        """
+        Unified entrypoint for text/image baselines.
+        Priority: captum -> shap -> lime (first available).
+        Returns a dict (safe for Streamlit to display).
+        """
+        # Specialized helpers if you have them in your repo:
+        if hasattr(self, "explain_text") and isinstance(input_data, (str, list)):
+            return self.explain_text(text=input_data,
+                                     target=target_class,
+                                     additional_forward_args=additional_forward_args,
+                                     **kwargs)
+        if hasattr(self, "explain_image") and not isinstance(input_data, (str, list)):
+            return self.explain_image(image=input_data,
+                                      target=target_class,
+                                      additional_forward_args=additional_forward_args,
+                                      **kwargs)
+
+        # Default route through initialized explainers
+        for key in ("captum", "shap", "lime"):
+            expl = self.explainers.get(key)
+            if expl is None:
+                continue
+            try:
+                return expl.explain(input_data, target_class,
+                                    additional_forward_args=additional_forward_args,
+                                    **kwargs)
+            except Exception as e:
+                log.warning("⚠️ %s explain failed: %s", key, e)
+                continue
+
+        raise AttributeError("ExplainerHub has no usable explain method")
+
+# ------------------------- WRAPPERS -------------------------
+
+class CaptumWrapper:
+    def __init__(self, model, model_type, AttrClass):
+        self.model = model
+        self.model_type = model_type
+        self.AttrClass = AttrClass
+
+    def explain(self, input_data, target_class=None, additional_forward_args=None, **_):
+        from captum.attr import visualization as viz  # optional; may not be used
+        attr = self.AttrClass(self.model)
+
+        # BERT convenience: dict inputs from tokenizer
+        if self.model_type == "bert_sentiment" and isinstance(input_data, dict):
+            inputs = input_data  # expects dict of input_ids/attention_mask
+            # Hugging Face models accept dict **inputs
+            attributions = attr.attribute(inputs=inputs["input_ids"],
+                                          target=target_class,
+                                          additional_forward_args=(inputs.get("attention_mask"),))
         else:
-            return "unknown"
-    
-    def _initialize_explainers(self):
-        """Initialize available explainers."""
-        logger.info(f"🔧 Initializing explainers for {self.model_type}")
-        
-        # SHAP
-        if SHAP_AVAILABLE:
-            try:
-                self.explainers['shap'] = SHAPExplainer(self.model, self.device)
-                if self.explainers['shap'].is_available():
-                    logger.info("✅ SHAP explainer initialized")
-                else:
-                    del self.explainers['shap']
-            except Exception as e:
-                logger.warning(f"⚠️ SHAP initialization failed: {e}")
-        
-        # LIME
-        if LIME_AVAILABLE:
-            try:
-                self.explainers['lime'] = LIMEExplainer(self.model, self.device)
-                if self.explainers['lime'].is_available():
-                    logger.info("✅ LIME explainer initialized")
-                else:
-                    del self.explainers['lime']
-            except Exception as e:
-                logger.warning(f"⚠️ LIME initialization failed: {e}")
-        
-        # Captum
-        if CAPTUM_AVAILABLE:
-            try:
-                self.explainers['captum'] = CaptumExplainer(self.model, self.device)
-                if self.explainers['captum'].is_available():
-                    logger.info("✅ Captum explainer initialized")
-                else:
-                    del self.explainers['captum']
-            except Exception as e:
-                logger.warning(f"⚠️ Captum initialization failed: {e}")
-    
-    def get_available_explainers(self) -> List[str]:
-        """Get list of available explainers."""
-        return list(self.explainers.keys())
-    
-    def explain_with_all(
-        self, 
-        input_data: Any, 
-        target_class: int = None, 
-        **kwargs
-    ) -> Dict[str, Dict[str, Any]]:
-        """Generate explanations using all available methods."""
-        
-        explanations = {}
-        
-        for method_name, explainer in self.explainers.items():
-            try:
-                logger.info(f"🔍 Generating {method_name.upper()} explanation...")
-                
-                if method_name == 'captum' and self.model_type == "bert_sentiment":
-                    # Handle attention mask for Captum with BERT
-                    if isinstance(input_data, dict):
-                        attention_mask = input_data.get('attention_mask', None)
-                        input_ids = input_data['input_ids']
-                        additional_args = (attention_mask,) if attention_mask is not None else None
-                        explanation = explainer.explain(input_ids, target_class, additional_forward_args=additional_args, **kwargs)
-                    else:
-                        explanation = explainer.explain(input_data, target_class, **kwargs)
-                else:
-                    explanation = explainer.explain(input_data, target_class, **kwargs)
-                
-                explanations[method_name] = explanation
-                logger.info(f"✅ {method_name.upper()} explanation completed")
-                
-            except Exception as e:
-                logger.error(f"❌ {method_name.upper()} explanation failed: {e}")
-                explanations[method_name] = {
-                    'method': method_name.upper(),
-                    'error': str(e),
-                    'model_type': self.model_type
-                }
-        
-        return explanations
-    
-    def explain_with_method(
-        self, 
-        method_name: str, 
-        input_data: Any, 
-        target_class: int = None, 
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Generate explanation using specific method."""
-        
-        if method_name not in self.explainers:
-            return {
-                'method': method_name.upper(),
-                'error': f'Method {method_name} not available',
-                'available_methods': self.get_available_explainers(),
-                'model_type': self.model_type
-            }
-        
-        explainer = self.explainers[method_name]
-        return explainer.explain(input_data, target_class, **kwargs)
-    
-    def compare_methods(
-        self, 
-        input_data: Any, 
-        target_class: int = None, 
-        methods: List[str] = None,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Compare explanations from multiple methods."""
-        
-        if methods is None:
-            methods = self.get_available_explainers()
-        
-        explanations = {}
-        for method in methods:
-            if method in self.explainers:
-                explanations[method] = self.explain_with_method(method, input_data, target_class, **kwargs)
-        
-        # Compute comparison metrics if multiple explanations available
-        comparison_metrics = self._compute_comparison_metrics(explanations)
-        
-        return {
-            'explanations': explanations,
-            'comparison_metrics': comparison_metrics,
-            'model_type': self.model_type,
-            'methods_compared': list(explanations.keys())
-        }
-    
-    def _compute_comparison_metrics(self, explanations: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Compute metrics comparing different explanation methods."""
-        
-        metrics = {
-            'methods_successful': [],
-            'methods_failed': [],
-            'attribution_similarities': {}
-        }
-        
-        successful_explanations = {}
-        
-        # Identify successful explanations
-        for method, explanation in explanations.items():
-            if 'error' not in explanation and 'attributions' in explanation:
-                metrics['methods_successful'].append(method)
-                successful_explanations[method] = explanation
-            else:
-                metrics['methods_failed'].append(method)
-        
-        # Compute attribution similarities between successful methods
-        if len(successful_explanations) >= 2:
-            methods = list(successful_explanations.keys())
-            for i, method1 in enumerate(methods):
-                for method2 in methods[i+1:]:
-                    try:
-                        attr1 = successful_explanations[method1]['attributions']
-                        attr2 = successful_explanations[method2]['attributions']
-                        
-                        # Ensure same shape
-                        min_len = min(len(attr1), len(attr2))
-                        attr1 = attr1[:min_len]
-                        attr2 = attr2[:min_len]
-                        
-                        # Compute correlation
-                        correlation = np.corrcoef(attr1, attr2)[0, 1]
-                        metrics['attribution_similarities'][f'{method1}_vs_{method2}'] = float(correlation)
-                        
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not compare {method1} and {method2}: {e}")
-        
-        return metrics
+            attributions = attr.attribute(inputs=input_data, target=target_class,
+                                          additional_forward_args=additional_forward_args)
+        # Return a serializable dict
+        try:
+            arr = attributions.detach().cpu().numpy()
+        except Exception:
+            arr = attributions
+        return {"captum_attribution": arr}
+
+class SHAPWrapper:
+    def __init__(self, model, model_type, device):
+        self.model = model.to(device).eval()
+        self.model_type = model_type
+        self.device = device
+
+    def explain(self, input_data, target_class=None, additional_forward_args=None, **_):
+        import shap
+        # Use GradientExplainer when TF DeepExplainer is unavailable
+        e = shap.GradientExplainer(self.model, input_data if isinstance(input_data, torch.Tensor) else None)
+        vals = e.shap_values(input_data)
+        return {"shap_values": vals}
+
+class LIMEWrapper:
+    def __init__(self, model, model_type, device):
+        self.model = model.to(device).eval()
+        self.model_type = model_type
+        self.device = device
+        # Lazy init of actual LIME explainers per modality
+
+    def explain(self, input_data, target_class=None, additional_forward_args=None, **_):
+        # Very light placeholder so the hub doesn’t crash if LIME is installed
+        return {"lime": "not configured for this modality"}
 
 
 # Utility functions

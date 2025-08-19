@@ -15,7 +15,7 @@ from importlib.metadata import version as _pkg_version
 
 # Core algorithm
 from .ra import ReverseAttribution
-
+from .visualizer import ExplanationVisualizer
 # Model factory
 from .model_factory import ModelFactory
 
