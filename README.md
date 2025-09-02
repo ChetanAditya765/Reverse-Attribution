@@ -4,6 +4,7 @@ Reverse Attribution (RA) highlights **counter‑evidence**—the parts of an inp
 
 This repo includes a polished Streamlit demo, a click‑to‑mask interaction for **text & vision**, Captum baselines, and scripts to train/evaluate and reproduce RA analysis figures.
 
+Youtube Demo : https://youtu.be/vf-oaVzn1iQ
 ---
 
 ## ✨ What’s inside
@@ -106,6 +107,7 @@ export TOKENIZERS_PARALLELISM=False
 
 Create folders and drop your fine‑tuned weights as `best_model.pt`:
 
+Hugging Space Repo : https://huggingface.co/KillBill765/Reverse-Attribution
 ```
 checkpoints/
 ├── bert_imdb/best_model.pt
